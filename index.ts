@@ -2,11 +2,12 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { stat } from "node:fs/promises";
+import { stat, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   discoverAgents,
   discoverDelegates,
+  parseAgent,
   type AgentConfig,
 } from "./agents.js";
 import {
@@ -25,9 +26,20 @@ import {
   type RoleCatalog,
 } from "pi-subagent-runtime/roles";
 import { pickRole, previewRole } from "./role-picker.js";
+import { registerProfileResources } from "./profile-resources.js";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export default function agentSwitcherExtension(pi: ExtensionAPI) {
   const state = new AgentStateManager();
+  registerProfileResources(pi, () =>
+    state.agent
+      ? {
+          name: state.agent.name,
+          scope: state.agent.resourceProfile,
+          tools: state.agent.tools,
+        }
+      : undefined,
+  );
   let cwd = process.cwd();
   let selecting = false;
   let changing = false;
@@ -247,6 +259,23 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     try {
       if (saved?.currentAgent) await change(saved.currentAgent, ctx, false);
       else if (state.baseline) await change(null, ctx, false);
+      else if (!saved && !Number(process.env.PI_SUBAGENT_DEPTH ?? "0")) {
+        let defaultAgent: string | undefined;
+        try {
+          defaultAgent = JSON.parse(
+            await readFile(
+              path.join(getAgentDir(), "agent-profiles.json"),
+              "utf8",
+            ),
+          ).defaultAgent;
+        } catch {
+          /* Optional configuration. */
+        }
+        if (defaultAgent) {
+          await change(defaultAgent, ctx, false);
+          state.persist(pi);
+        }
+      }
     } catch (error) {
       report(ctx, error);
     }
@@ -390,6 +419,67 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
             : args.trim(),
           ctx,
         );
+      } catch (error) {
+        report(ctx, error);
+      }
+    },
+  });
+  pi.registerCommand("agent-config", {
+    description:
+      "Save model/effort for main and future child runs: /agent-config <agent> <provider/model> [effort]",
+    handler: async (args, ctx) => {
+      try {
+        if (!ctx.isIdle())
+          throw new Error(
+            "Wait for the current turn to finish before changing an agent definition.",
+          );
+        const [name, selected, effort, extra] = args.trim().split(/\s+/);
+        const slash = selected?.indexOf("/") ?? -1;
+        if (!name || slash <= 0 || extra)
+          throw new Error(
+            "Usage: /agent-config <agent> <provider/model> [effort]",
+          );
+        const agent = (await discoverAgents(ctx.cwd)).agents.find(
+          (a) => a.name === name,
+        );
+        if (!agent) throw new Error(`Unknown agent: ${name}`);
+        if (agent.source === "project" && !ctx.isProjectTrusted())
+          throw new Error(
+            "Trust this project before changing its agent definition.",
+          );
+        const provider = selected.slice(0, slash),
+          model = selected.slice(slash + 1);
+        if (!ctx.modelRegistry.find(provider, model))
+          throw new Error(`Model unavailable: ${selected}`);
+        const original = await readFile(agent.filePath, "utf8");
+        const updated = original.replace(
+          /^---\r?\n([\s\S]*?)\r?\n---/,
+          (_match, fields: string) => {
+            const retained = fields
+              .split(/\r?\n/)
+              .filter(
+                (line) =>
+                  !/^(provider|model|thinking|thinkingLevel):/.test(line),
+              );
+            return [
+              "---",
+              ...retained,
+              `provider: ${JSON.stringify(provider)}`,
+              `model: ${JSON.stringify(model)}`,
+              `thinking: ${JSON.stringify(effort ?? agent.thinking ?? "medium")}`,
+              "---",
+            ].join("\n");
+          },
+        );
+        parseAgent(updated, agent.filePath, agent.source, agent.shared);
+        await writeFile(agent.filePath, updated, "utf8");
+        delete state.overrides[name];
+        state.persist(pi);
+        ctx.ui.notify(
+          `Saved ${name}: ${selected}, ${effort ?? agent.thinking ?? "medium"}. Future children use this definition; existing runs keep their current model.`,
+          "info",
+        );
+        if (state.agent?.name === name) await change(name, ctx);
       } catch (error) {
         report(ctx, error);
       }

@@ -168,6 +168,31 @@ function host(cwd) {
   };
 }
 
+test("agent-config saves defaults for future children and updates the selected main agent", async () => {
+  const cwd = await fixture(),
+    h = host(cwd);
+  await h.command("agent", "scout");
+  await h.command("agent-config", "scout fake/base high");
+  const definition = await fs.readFile(
+    path.join(cwd, ".pi/agents/scout.md"),
+    "utf8",
+  );
+  assert.match(definition, /model: "base"/);
+  assert.match(definition, /thinking: "high"/);
+  assert.equal(h.state.model.id, "base");
+  assert.equal(h.state.thinking, "high");
+  await h.command("agent-config", "scout fake/cheap invalid");
+  assert.equal(
+    await fs.readFile(path.join(cwd, ".pi/agents/scout.md"), "utf8"),
+    definition,
+  );
+  h.setIdle(false);
+  await h.command("agent-config", "scout fake/cheap low");
+  assert.equal(
+    await fs.readFile(path.join(cwd, ".pi/agents/scout.md"), "utf8"),
+    definition,
+  );
+});
 test("roles command shows names and descriptions without IDs or User labels, retaining ID search", async () => {
   const folder = path.join(temp, "user/roles");
   const id = "hidden-listing-id";

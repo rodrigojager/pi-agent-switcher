@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 export interface AgentConfig {
+  resourceProfile?: string;
   role?: string;
   roleDiagnostic?: string;
   name: string;
@@ -88,6 +89,9 @@ export function parseAgent(
     name: f.name,
     description: f.description.trim(),
     systemPrompt: body.trim(),
+    ...(typeof f.resource_profile === "string"
+      ? { resourceProfile: f.resource_profile }
+      : {}),
     role: declaredRole(f.role),
     ...(f.role != null && f.role !== "" && !declaredRole(f.role)
       ? { roleDiagnostic: "Invalid optional role ID; ignored" }

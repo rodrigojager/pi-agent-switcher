@@ -76,6 +76,15 @@ export default function(pi) {
   });
 }`,
       );
+      await fs.mkdir(path.join(agentDir, "extensions"), { recursive: true });
+      await fs.writeFile(
+        path.join(agentDir, "extensions/resource-executor.ts"),
+        `import {createChildProfile} from ${JSON.stringify(path.join(root, "profile-resources.ts").replace(/\\/g, "/"))}; export default createChildProfile("scoped");`,
+      );
+      await fs.writeFile(
+        path.join(agentDir, "agents/scoped.md"),
+        "---\nname: scoped\ndescription: Scoped child fixture\nprovider: offline-switcher\nmodel: cheap\nthinking: high\nresource_profile: executor\ntools: read, skill_catalog, skill_load\nskills: false\ncontext: false\nextensions: offline-provider, resource-executor\n---\nSCOPED_CHILD_BODY",
+      );
       const config = {
         extensions: [provider, path.join(root, "index.ts"), bridge],
         defaultProvider: "offline-switcher",
@@ -419,6 +428,38 @@ export default function(pi) {
         "No active /run jobs.",
         "Cancellation lifecycle released the run registry before session disposal",
       );
+      assert.deepEqual(errors, []);
+      await session.prompt("@scoped Verify child resource scope", {
+        source: "interactive",
+      });
+      const scopedDeadline = Date.now() + 15000;
+      while (
+        Date.now() < scopedDeadline &&
+        !session.messages.some(
+          (m) =>
+            m.role === "custom" &&
+            m.customType === "subagent-result" &&
+            JSON.stringify(m).includes("Verify child resource scope"),
+        )
+      )
+        await new Promise((r) => setTimeout(r, 50));
+      const scopedCall = (await records()).find(
+        (c) =>
+          c.child &&
+          JSON.stringify(c.context.messages).includes(
+            "Verify child resource scope",
+          ),
+      );
+      assert.ok(scopedCall, "Scoped child reached the actual offline runtime");
+      const scopedTools = scopedCall.context.messages
+        .filter((m) => m.role === "system")
+        .flatMap((m) => m.toolsAdded ?? [])
+        .map((t) => t.name);
+      assert.ok(scopedTools.includes("complete"));
+      assert.ok(scopedTools.includes("skill_load"));
+      assert.equal(scopedTools.includes("subagent"), false);
+      assert.equal(scopedTools.includes("roles"), false);
+      assert.match(JSON.stringify(scopedCall.context), /SCOPED_CHILD_BODY/);
       assert.deepEqual(errors, []);
     } finally {
       if (session) {

@@ -1,5 +1,14 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.6
+
+- Add nine dedicated profiles: separate Astra planner and Sol orchestrator, Luna executor/reviewer/operators, user-only scout, and adjustable Higgsfield/Blender specialists.
+- Add bounded, on-demand skill and delegate catalogs with profile allowlists and trusted project skill discovery. Exclude review staging from discovery.
+- Scope MCP schemas/calls to the active specialist and preserve images. Remove unrelated MCP metadata and obsolete profile resource declarations from outgoing requests, without editing saved history.
+- Restore explicit child resources and the existing account-pool provider; preserve Open Video Animator ownership contracts in English.
+- Add opt-in new-session default configuration, backed-up profile installer and /agent-config for durable main/child model-effort defaults.
+- Validate real offline Pi contexts and child execution, plus a live Windows-MCP Snapshot through the new gateway; no paid inference or desktop interaction.
+
 ## 0.4.0-rodrigo.5
 
 - Restore the role category next to the bold name, separated by a dot and rendered in muted color without bold.

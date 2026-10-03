@@ -16,6 +16,10 @@ If Pi is already open, use `/reload` after active work finishes. The package doe
 
 ## Usage
 
+[Dedicated profiles, lazy skills, model defaults and installation](docs/agent-profiles.md)
+describe the planner/orchestrator split and specialist resource policies introduced
+in `0.4.0-rodrigo.6`.
+
 | Action                               | Command or key                               |
 | ------------------------------------ | -------------------------------------------- |
 | Open the searchable main-agent popup | **Alt+A** or `/agent`                        |
