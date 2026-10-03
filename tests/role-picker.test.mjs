@@ -62,9 +62,12 @@ test("role cards show full-width descriptions below names and hide IDs and User 
     assert.equal(lines[row + 1].trim(), description);
     assert.ok(!lines[row].includes("Diagnose"));
     assert.ok(lines.join("\n").includes("Active: Root Cause Debugger"));
-    assert.doesNotMatch(
-      lines.join("\n"),
-      /hidden-debugger-id|hidden-category|\bUser\b/,
+    assert.doesNotMatch(lines.join("\n"), /hidden-debugger-id|\bUser\b/);
+    assert.ok(lines[row].includes(` · ${role.category}`));
+    const rendered = component.render(140)[row];
+    assert.ok(
+      rendered.includes(`\x1b[1m${role.name}\x1b[22m · ${role.category}`),
+      "only the role name is bold; category is separate metadata",
     );
     component.handleInput("\r");
   });
@@ -88,7 +91,10 @@ test("a blank line separates role cards without separating a name from its descr
     );
     assert.equal(lines[first + 1].trim(), description);
     assert.equal(lines[first + 2], "");
-    assert.equal(lines[first + 3].trim(), "Another Specialist");
+    assert.equal(
+      lines[first + 3].trim(),
+      `Another Specialist · ${role.category}`,
+    );
     assert.equal(lines[first + 4].trim(), "Different responsibility.");
   });
   await dialog(
@@ -108,7 +114,7 @@ test("a blank line separates role cards without separating a name from its descr
   );
 });
 
-test("hidden role IDs and categories remain searchable with normal Input handling", async () => {
+test("hidden role IDs and visible categories remain searchable with normal Input handling", async () => {
   for (const query of [
     "hidden-debugger-id",
     "hidden-category",
@@ -168,10 +174,63 @@ test("RPC role labels hide internal metadata but selection maps to the correct I
     catalog(),
   );
   assert.equal(value, role.id);
-  assert.equal(labels[1], `${role.name} — ${description}`);
-  assert.doesNotMatch(
-    labels.join("\n"),
-    /hidden-debugger-id|hidden-category|\bUser\b/,
+  assert.equal(labels[1], `${role.name} · ${role.category} — ${description}`);
+  assert.doesNotMatch(labels.join("\n"), /hidden-debugger-id|\bUser\b/);
+});
+
+test("category uses muted color independently of selection, project marker stays visible, and absent categories omit the separator", async () => {
+  const { getThemeByName } =
+    await import("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+  const coloredTheme = getThemeByName("dark");
+  let component;
+  await pickRole(
+    {
+      hasUI: true,
+      mode: "tui",
+      ui: {
+        async custom(factory) {
+          component = factory(
+            { requestRender() {}, terminal: { rows: 40 } },
+            coloredTheme,
+            {},
+            () => {},
+          );
+          return null;
+        },
+      },
+    },
+    catalog([
+      { ...role, source: "project" },
+      { ...role, id: "no-group", name: "Ungrouped", category: undefined },
+    ]),
+    role.id,
+  );
+  const selected = component
+    .render(160)
+    .find((line) => plain(line).includes("› Root Cause Debugger"));
+  assert.ok(selected.includes(coloredTheme.bold(role.name)));
+  assert.ok(
+    selected.includes(
+      coloredTheme.fg("muted", ` · ${role.category} · Project`),
+    ),
+  );
+  assert.doesNotMatch(plain(selected), /hidden-debugger-id|User/);
+  const ungrouped = component
+    .render(160)
+    .find((line) => plain(line).includes("Ungrouped"));
+  assert.equal(plain(ungrouped).trim(), "Ungrouped");
+  component.handleInput("\x1b[B");
+  const unselected = component
+    .render(160)
+    .find(
+      (line) =>
+        plain(line).includes("Root Cause Debugger") &&
+        !plain(line).includes("Active:"),
+    );
+  assert.ok(
+    unselected.includes(
+      coloredTheme.fg("muted", ` · ${role.category} · Project`),
+    ),
   );
 });
 

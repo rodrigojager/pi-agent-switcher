@@ -14,6 +14,7 @@ export interface PickerItem {
   name: string;
   description: string;
   value: string;
+  metadata?: string;
   searchText?: string;
 }
 function normalize(text: string) {
@@ -27,7 +28,7 @@ export function filterItems(items: PickerItem[], query: string) {
   return items.filter((item) =>
     words.every((word) =>
       normalize(
-        `${item.name} ${item.description} ${item.searchText ?? ""}`,
+        `${item.name} ${item.metadata ?? ""} ${item.description} ${item.searchText ?? ""}`,
       ).includes(word),
     ),
   );
@@ -138,12 +139,13 @@ export class AgentPicker {
       const prefix = i === this.selected ? "› " : "  ";
       const name = this.theme.bold(item.name);
       const badge = item.value === this.current ? " · active" : "";
-      const label = `${prefix}${name}${badge}`;
+      const title = `${prefix}${name}`;
+      const label = `${i === this.selected ? this.theme.fg("accent", title) : title}${item.metadata ? this.theme.fg("muted", ` · ${item.metadata}`) : ""}${this.theme.fg("dim", badge)}`;
       const description = item.description.replace(/[\r\n]+/g, " ");
       if (this.layout === "cards") {
         if (i > start) lines.push("");
         lines.push(
-          line(i === this.selected ? this.theme.fg("accent", label) : label),
+          line(label),
           line(
             `  ${this.theme.fg("muted", truncateToWidth(description, Math.max(1, inner - 2)))}`,
           ),
@@ -151,13 +153,11 @@ export class AgentPicker {
       } else if (visibleWidth(label) + 5 < inner && inner >= 60) {
         lines.push(
           line(
-            `${i === this.selected ? this.theme.fg("accent", label) : label}  ${this.theme.fg("muted", truncateToWidth(description, inner - visibleWidth(label) - 2))}`,
+            `${label}  ${this.theme.fg("muted", truncateToWidth(description, inner - visibleWidth(label) - 2))}`,
           ),
         );
       } else {
-        lines.push(
-          line(i === this.selected ? this.theme.fg("accent", label) : label),
-        );
+        lines.push(line(label));
         lines.push(
           ...wrapTextWithAnsi(
             this.theme.fg("muted", description),
@@ -250,7 +250,10 @@ export async function pickItems(
 ) {
   if (!ctx.hasUI) return null;
   if (ctx.mode !== "tui") {
-    const labels = items.map((item) => `${item.name} — ${item.description}`);
+    const labels = items.map(
+      (item) =>
+        `${item.name}${item.metadata ? ` · ${item.metadata}` : ""} — ${item.description}`,
+    );
     const selected = await ctx.ui.select(title, labels);
     return selected ? (items[labels.indexOf(selected)]?.value ?? null) : null;
   }

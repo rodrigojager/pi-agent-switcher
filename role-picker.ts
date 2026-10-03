@@ -17,7 +17,10 @@ export function pickRole(
   readonly = false,
 ) {
   const roles = catalog.roles.map((r) => ({
-    name: r.source === "project" ? `${r.name} · Project` : r.name,
+    name: r.name,
+    metadata: [r.category, r.source === "project" ? "Project" : undefined]
+      .filter(Boolean)
+      .join(" · "),
     value: r.id,
     description: r.description,
     searchText: `${r.id} ${r.category}`,

@@ -1,5 +1,10 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.5
+
+- Restore the role category next to the bold name, separated by a dot and rendered in muted color without bold.
+- Preserve two-line cards, blank spacing, hidden IDs/User labels, category search and Project markers.
+
 ## 0.4.0-rodrigo.4
 
 - Highlight the active agent and role with separate theme colors and bold names; dim labels and inactive defaults. Keep RPC status text plain.
