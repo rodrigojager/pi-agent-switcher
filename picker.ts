@@ -8,6 +8,7 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { AgentConfig } from "./agents.js";
+import { discoverRoles, resolveRole } from "pi-subagent-runtime/roles";
 
 export interface PickerItem {
   name: string;
@@ -32,7 +33,7 @@ export function filterItems(items: PickerItem[], query: string) {
 export class AgentPicker {
   readonly input = new Input({
     prompt: "Search: ",
-    placeholder: "Agent name or description",
+    placeholder: "Name, ID, category or description",
   });
   private selected = 0;
   private matches: PickerItem[];
@@ -151,7 +152,7 @@ export class AgentPicker {
       }
     }
     if (!this.matches.length)
-      lines.push(line(this.theme.fg("warning", "No matching agents")));
+      lines.push(line(this.theme.fg("warning", "No matching items")));
     lines.push(
       "",
       line(
@@ -171,10 +172,14 @@ export async function pickAgent(
   current: string | undefined,
   delegation = false,
 ) {
+  const catalog = await discoverRoles({
+    cwd: ctx.cwd,
+    allowProject: ctx.isProjectTrusted(),
+  });
   const items: PickerItem[] = agents.map((agent) => ({
     name: agent.name,
     value: agent.name,
-    description: agent.description,
+    description: `${agent.description} · Role: ${resolveRole(catalog, agent.role).displayName ?? "None"}`,
   }));
   if (!delegation)
     items.push({
@@ -207,6 +212,33 @@ export async function pickAgent(
         theme,
         done,
       ),
+    {
+      overlay: true,
+      overlayOptions: {
+        width: "85%",
+        maxHeight: "80%",
+        minWidth: 20,
+        anchor: "center",
+      },
+    },
+  );
+}
+
+export async function pickItems(
+  ctx: ExtensionContext,
+  items: PickerItem[],
+  current: string | undefined,
+  title: string,
+) {
+  if (!ctx.hasUI) return null;
+  if (ctx.mode !== "tui") {
+    const labels = items.map((item) => `${item.name} — ${item.description}`);
+    const selected = await ctx.ui.select(title, labels);
+    return selected ? (items[labels.indexOf(selected)]?.value ?? null) : null;
+  }
+  return ctx.ui.custom<string | null>(
+    (tui, theme, _keys, done) =>
+      new AgentPicker(items, current, title, tui, theme, done),
     {
       overlay: true,
       overlayOptions: {

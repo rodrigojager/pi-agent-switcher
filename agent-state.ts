@@ -10,6 +10,7 @@ export interface Baseline {
   thinking: ReturnType<ExtensionAPI["getThinkingLevel"]>;
 }
 export interface PersistedState {
+  baseConversationRole?: string;
   currentAgent: string | null;
   baseline?: Baseline;
   overrides?: Record<string, ProfileOverride>;
@@ -19,6 +20,7 @@ export interface ProfileOverride {
   thinking?: ReturnType<ExtensionAPI["getThinkingLevel"]>;
 }
 export class AgentStateManager {
+  baseConversationRole: string | undefined;
   agent: AgentConfig | null = null;
   baseline: Baseline | undefined;
   overrides: Record<string, ProfileOverride> = {};
@@ -34,6 +36,7 @@ export class AgentStateManager {
   persist(pi: ExtensionAPI) {
     pi.appendEntry("agent-switcher-state", {
       currentAgent: this.agent?.name ?? null,
+      baseConversationRole: this.baseConversationRole,
       baseline: this.baseline,
       overrides: this.overrides,
     } satisfies PersistedState);

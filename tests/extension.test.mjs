@@ -16,6 +16,10 @@ const models = [
   { id: "base", provider: "fake" },
   { id: "cheap", provider: "fake" },
 ];
+async function writeRole(folder, id, body) {
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(path.join(folder, id + ".md"), body);
+}
 async function writeAgent(
   folder,
   name,
@@ -162,6 +166,108 @@ function host(cwd) {
     },
   };
 }
+
+test("base roles are branch-aware, named agents own their defaults, and missing roles clear only the owned section", async () => {
+  const cwd = await fixture();
+  await writeRole(
+    path.join(cwd, ".pi/roles"),
+    "backend-architect",
+    "ARCHITECT_ROLE",
+  );
+  await writeRole(
+    path.join(cwd, ".pi/roles"),
+    "code-reviewer",
+    "REVIEWER_ROLE",
+  );
+  await writeAgent(
+    path.join(cwd, ".pi/agents"),
+    "architect",
+    "role: backend-architect",
+    "ARCHITECT_AGENT",
+  );
+  await writeAgent(
+    path.join(cwd, ".pi/agents"),
+    "missing",
+    "role: absent",
+    "MISSING_AGENT",
+  );
+  const h = host(cwd);
+  await h.emit("session_start");
+  const options = () => ({
+    skills: [],
+    contextFiles: [],
+    sections: { unrelated: "KEEP" },
+  });
+  await h.command("role", "code-reviewer");
+  const branch = [...h.state.branch];
+  let prompt = options();
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.match(prompt.sections.professional_role, /REVIEWER_ROLE/);
+  await h.command("agent", "architect");
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.match(prompt.sections.professional_role, /ARCHITECT_ROLE/);
+  assert.doesNotMatch(prompt.sections.professional_role, /REVIEWER_ROLE/);
+  await h.command("role", "none");
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.match(prompt.sections.professional_role, /ARCHITECT_ROLE/);
+  await h.command("agent", "missing");
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.equal(prompt.sections.professional_role, undefined);
+  assert.equal(prompt.sections.unrelated, "KEEP");
+  await h.command("agent", "reset");
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.match(prompt.sections.professional_role, /REVIEWER_ROLE/);
+  assert.equal(prompt.sections.agent_profile, undefined);
+  await h.command("role", "none");
+  h.setBranch(branch);
+  await h.emit("session_tree");
+  prompt = options();
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.match(prompt.sections.professional_role, /REVIEWER_ROLE/);
+  h.setBranch([]);
+  await h.emit("session_tree");
+  await h.emit("before_agent_start", { systemPromptOptions: prompt });
+  assert.equal(prompt.sections.professional_role, undefined);
+});
+
+test("mentions and commands forward one role; parsing failures and old bridges preserve tasks without launch", async () => {
+  const cwd = await fixture();
+  const h = host(cwd);
+  const requests = [];
+  h.pi.events.on(DELEGATION_CHANNEL, (request) => {
+    requests.push(request);
+    request.accept(async () => ({ ok: true, message: "Started" }));
+  });
+  await h.emit("input", {
+    source: "interactive",
+    text: "@scout --role=none Task\n  exact indentation",
+  });
+  assert.equal(requests[0].role, "none");
+  assert.equal(requests[0].task, "Task\n  exact indentation");
+  await h.command("delegate", "scout --role code-reviewer Review");
+  assert.equal(requests[1].role, "code-reviewer");
+  await h.emit("input", {
+    source: "interactive",
+    text: "@agent:scout Fresh task",
+  });
+  assert.equal(requests[2].role, undefined);
+  const malformed = "@scout --role none --role default Task";
+  await h.emit("input", { source: "interactive", text: malformed });
+  assert.equal(requests.length, 3);
+  assert.equal(h.state.editor, malformed);
+  const old = host(cwd);
+  let launches = 0;
+  old.pi.events.on("rodrigojager:pi-subagent:delegate:v1", () => {
+    launches++;
+  });
+  await old.emit("input", {
+    source: "interactive",
+    text: "@scout --role none Task",
+  });
+  assert.equal(launches, 0);
+  assert.equal(old.state.editor, "@scout --role none Task");
+  assert.match(old.notifications.at(-1).message, /v2 bridge/);
+});
 test.after(async () => {
   await fs.rm(temp, { recursive: true, force: true });
 });
@@ -274,7 +380,7 @@ test("switches model/tools/thinking immediately; omitted settings and reset use 
   assert.deepEqual(h.state.tools, ["read", "subagent"]);
   await h.command("agent", "reset");
   assert.deepEqual(h.state.tools, ["read", "write", "subagent"]);
-  assert.equal(h.state.status, undefined);
+  assert.equal(h.state.status, "Agent: Pi default | Role: None");
   assert.equal(h.state.branch.at(-1).data.currentAgent, null);
   assert.ok(h.shortcuts.has("alt+a"));
   assert.ok(!h.shortcuts.has("ctrl+a"));
@@ -415,7 +521,7 @@ test("mentions delegate once without switching profile; normal file references c
 test("missing bridge, attachments and unknown explicit target preserve the task for retry", async () => {
   const h = host(await fixture());
   await h.emit("input", { text: "@scout inspect", source: "interactive" });
-  assert.match(h.notifications.at(-1).message, /Delegation needs/);
+  assert.match(h.notifications.at(-1).message, /delegation needs/);
   assert.equal(h.state.editor, "@scout inspect");
   await h.emit("input", {
     text: "@scout inspect",

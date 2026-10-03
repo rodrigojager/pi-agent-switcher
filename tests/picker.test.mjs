@@ -56,7 +56,7 @@ test("name and description search supports accents, multiple words and digits", 
 test("typing, deletion, empty results and Enter select the visible result", () => {
   const { component, result } = picker();
   for (const char of "reviewerx") component.handleInput(char);
-  assert.match(component.render(100).join("\n"), /No matching agents/);
+  assert.match(component.render(100).join("\n"), /No matching items/);
   component.handleInput("\r");
   assert.equal(result(), undefined);
   component.handleInput("\x7f");

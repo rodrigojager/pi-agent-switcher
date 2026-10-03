@@ -30,3 +30,9 @@
 - Add tests for discovery, filtering, rendering, activation/reset, skills, branch restoration, mentions, file completions, and real SDK/child execution with an offline provider.
 
 The child execution engine, progress cards, cancellation, and `/jobs` remain provided by `rodrigojager/pi-subagent`.
+# 0.4.0-rodrigo.1
+
+- Share the pure production roles core with pi-subagent 0.13.0-rodrigo.1.
+- Add branch-aware Pi-default role selection and read-only named-agent browsing.
+- Add invocation role parsing, completions, a fresh Default delegation picker and v2 bridge.
+- Preserve structured prompt sections, native file mentions, execution settings and task retry behavior.

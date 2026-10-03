@@ -7,16 +7,20 @@ import { fileURLToPath } from "node:url";
 
 test(
   "real Pi SDK switches profiles and delegates to a real offline child without a main-model request",
-  { timeout: 30000 },
+  { timeout: 120000 },
   async () => {
-    const root = path.resolve(import.meta.dirname, "..");
+    const root = process.env.PI_SWITCHER_TEST_ROOT
+      ? path.resolve(process.env.PI_SWITCHER_TEST_ROOT)
+      : path.resolve(import.meta.dirname, "..");
     const temp = await fs.mkdtemp(
       path.join(os.tmpdir(), "agent-switcher-sdk-"),
     );
     const agentDir = path.join(temp, "agent");
     const marker = path.join(temp, "requests.jsonl");
     const provider = path.join(agentDir, "offline-provider.ts");
-    const bridge = fileURLToPath(import.meta.resolve("pi-subagent-runtime"));
+    const bridge =
+      process.env.PI_SUBAGENT_TEST_ENTRY ??
+      fileURLToPath(import.meta.resolve("pi-subagent-runtime"));
     const oldDir = process.env.PI_CODING_AGENT_DIR,
       oldMarker = process.env.SWITCHER_TEST_MARKER,
       oldArgv = process.argv[1],
@@ -29,11 +33,24 @@ test(
       await fs.mkdir(path.join(agentDir, "agents"), { recursive: true });
       await fs.writeFile(
         path.join(agentDir, "agents/scout.md"),
-        "---\nname: scout\ndescription: Offline evidence collector\nprovider: offline-switcher\nmodel: cheap\nthinking: low\ntools: read\nskills: false\nextensions: offline-provider\n---\nCollect the requested evidence.",
+        "---\nname: scout\ndescription: Offline evidence collector\nprovider: offline-switcher\nmodel: cheap\nthinking: low\nrole: backend-architect\ntools: read\nskills: false\nextensions: offline-provider\n---\nCollect the requested evidence.",
       );
       await fs.writeFile(
         path.join(agentDir, "agents/planner.md"),
         "---\nname: planner\ndescription: Offline planner\nskills: video\ntools: read\n---\nPlan the work.",
+      );
+      await fs.mkdir(path.join(agentDir, "roles"), { recursive: true });
+      await fs.writeFile(
+        path.join(agentDir, "roles/backend-architect.md"),
+        "ARCHITECT_ROLE",
+      );
+      await fs.writeFile(
+        path.join(agentDir, "roles/code-reviewer.md"),
+        "REVIEWER_ROLE",
+      );
+      await fs.writeFile(
+        path.join(agentDir, "agents/executor.md"),
+        "---\nname: executor\ndescription: Roles fixture\nprovider: offline-switcher\nmodel: cheap\nrole: backend-architect\nskills: false\ncontext: false\nextensions: offline-provider\nreplace_prompt: true\n---\nEXECUTOR_BODY",
       );
       await fs.writeFile(
         provider,
@@ -216,6 +233,114 @@ export default function(pi) {
       );
       assert.ok(calls.some((call) => call.child && call.model === "cheap"));
       assert.equal(session.model.id, "base");
+      const launchForms = [
+        "@agent:executor roles-default",
+        "/delegate executor --role none roles-none",
+        "/run executor --role=code-reviewer roles-reviewer",
+      ];
+      await Promise.all(
+        launchForms.map((text) =>
+          session.prompt(text, { source: "interactive" }),
+        ),
+      );
+      const expectedResults = 4;
+      const roleDeadline = Date.now() + 20000;
+      while (
+        Date.now() < roleDeadline &&
+        session.messages.filter(
+          (m) => m.role === "custom" && m.customType === "subagent-result",
+        ).length < expectedResults
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      const resultMessages = session.messages.filter(
+        (m) => m.role === "custom" && m.customType === "subagent-result",
+      );
+      assert.equal(
+        resultMessages.length,
+        expectedResults,
+        "All concurrent roles return completion",
+      );
+      calls = await records();
+      for (const [task, id, marker] of [
+        ["roles-default", "backend-architect", "ARCHITECT_ROLE"],
+        ["roles-none", undefined, undefined],
+        ["roles-reviewer", "code-reviewer", "REVIEWER_ROLE"],
+      ]) {
+        const call = calls.find(
+          (c) => c.child && JSON.stringify(c.context.messages).includes(task),
+        );
+        assert.ok(call, `Actual child model input captured: ${task}`);
+        const systemPrompt = JSON.stringify(
+          call.context.messages.filter((m) => m.role === "system"),
+        );
+        assert.match(systemPrompt, /EXECUTOR_BODY/);
+        assert.match(systemPrompt, /complete/);
+        assert.equal(
+          (systemPrompt.match(/ARCHITECT_ROLE/g) ?? []).length,
+          marker === "ARCHITECT_ROLE" ? 1 : 0,
+        );
+        assert.equal(
+          (systemPrompt.match(/REVIEWER_ROLE/g) ?? []).length,
+          marker === "REVIEWER_ROLE" ? 1 : 0,
+        );
+        const details = resultMessages.find(
+          (m) => m.details?.results?.[0]?.task === task,
+        )?.details.results[0];
+        assert.ok(details);
+        assert.equal(details.role.effectiveId, id);
+        assert.equal(
+          details.role.origin,
+          task === "roles-default" ? "agent-default" : "invocation",
+        );
+        assert.equal(details.role.body, undefined);
+        assert.equal(details.role.sourcePath, undefined);
+      }
+      assert.match(
+        await fs.readFile(path.join(agentDir, "agents/executor.md"), "utf8"),
+        /role: backend-architect/,
+      );
+      const defaultChild = calls.find(
+        (c) =>
+          c.child &&
+          JSON.stringify(c.context.messages).includes("collect evidence"),
+      );
+      assert.match(
+        JSON.stringify(
+          defaultChild.context.messages.filter((m) => m.role === "system"),
+        ),
+        /ARCHITECT_ROLE/,
+      );
+      await session.prompt("@executor Fresh default after override", {
+        source: "interactive",
+      });
+      const finalDeadline = Date.now() + 15000;
+      while (
+        Date.now() < finalDeadline &&
+        session.messages.filter(
+          (m) => m.role === "custom" && m.customType === "subagent-result",
+        ).length < 5
+      )
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      calls = await records();
+      assert.match(
+        JSON.stringify(
+          calls
+            .find(
+              (c) =>
+                c.child &&
+                JSON.stringify(c.context.messages).includes(
+                  "Fresh default after override",
+                ),
+            )
+            .context.messages.filter((m) => m.role === "system"),
+        ),
+        /ARCHITECT_ROLE/,
+      );
+      assert.equal(
+        calls.filter((c) => c.pid === process.pid).length,
+        mainCalls,
+        "Delegation never called the main model",
+      );
       assert.deepEqual(errors, []);
     } finally {
       if (session) {

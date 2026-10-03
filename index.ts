@@ -16,17 +16,39 @@ import {
 } from "./agent-state.js";
 import { pickAgent } from "./picker.js";
 import { delegate, parseMention, agentAutocomplete } from "./delegation.js";
+import {
+  discoverRoles,
+  resolveRole,
+  rolePrompt,
+  declaredRole,
+  parseRolePrefix,
+  type RoleCatalog,
+} from "pi-subagent-runtime/roles";
+import { pickRole, previewRole } from "./role-picker.js";
 
 export default function agentSwitcherExtension(pi: ExtensionAPI) {
   const state = new AgentStateManager();
   let cwd = process.cwd();
   let selecting = false;
   let changing = false;
-  const status = (ctx: ExtensionContext) =>
+  const catalogFor = (ctx: ExtensionContext) =>
+    discoverRoles({ cwd: ctx.cwd, allowProject: ctx.isProjectTrusted() });
+  const effectiveRole = (catalog: RoleCatalog) =>
+    state.agent
+      ? resolveRole(catalog, state.agent.role)
+      : resolveRole(
+          catalog,
+          undefined,
+          state.baseConversationRole ?? "none",
+          "base-conversation",
+        );
+  const status = async (ctx: ExtensionContext) => {
+    const role = effectiveRole(await catalogFor(ctx));
     ctx.ui.setStatus(
       "agent-switcher",
-      state.agent ? `Agent: ${state.agent.name}` : undefined,
+      `Agent: ${state.agent?.name ?? "Pi default"} | Role: ${role.displayName ?? "None"}`,
     );
+  };
   const report = (ctx: ExtensionContext, error: unknown) =>
     ctx.ui.notify(
       error instanceof Error ? error.message : String(error),
@@ -96,7 +118,8 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         );
       if (!agent && !state.baseline) {
         state.agent = null;
-        status(ctx);
+        if (persist) state.persist(pi);
+        await status(ctx);
         return;
       }
       const baseline = state.baseline ?? state.capture(pi, ctx);
@@ -131,7 +154,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       state.baseline = agent ? baseline : undefined;
       state.agent = agent ?? null;
       if (persist) state.persist(pi);
-      status(ctx);
+      await status(ctx);
       if (persist)
         ctx.ui.notify(
           agent ? `Main agent: ${agent.name}` : "Pi default restored",
@@ -172,11 +195,19 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       if (!delegation)
         await change(choice === "__reset__" ? null : choice, ctx);
       else {
+        const role = await pickRole(
+          ctx,
+          await catalogFor(ctx),
+          undefined,
+          agents.find((a) => a.name === choice)?.role,
+          true,
+        );
+        if (role === null) return;
         const task = await ctx.ui.input(
           `Task for ${choice}`,
           "Describe the task and include the context the specialist needs",
         );
-        if (task?.trim()) await dispatch(ctx, choice, task.trim());
+        if (task?.trim()) await dispatch(ctx, choice, task.trim(), role);
       }
     } catch (error) {
       report(ctx, error);
@@ -184,8 +215,13 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       selecting = false;
     }
   }
-  async function dispatch(ctx: ExtensionContext, agent: string, task: string) {
-    const result = await delegate(pi, ctx, agent, task);
+  async function dispatch(
+    ctx: ExtensionContext,
+    agent: string,
+    task: string,
+    role?: string,
+  ) {
+    const result = await delegate(pi, ctx, agent, task, role);
     if (!result.ok) throw new Error(result.message);
     ctx.ui.notify(result.message, "info");
   }
@@ -202,13 +238,14 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         saved = entry.data as PersistedState | undefined;
     state.baseline = saved?.baseline ?? previousBaseline;
     state.overrides = saved?.overrides ?? {};
+    state.baseConversationRole = declaredRole(saved?.baseConversationRole);
     try {
       if (saved?.currentAgent) await change(saved.currentAgent, ctx, false);
       else if (state.baseline) await change(null, ctx, false);
     } catch (error) {
       report(ctx, error);
     }
-    status(ctx);
+    await status(ctx);
   }
   pi.on("session_start", async (_event, ctx) => {
     await restore(ctx);
@@ -217,6 +254,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         agentAutocomplete(
           base,
           async () => (await discoverDelegates(cwd)).agents,
+          () => ({ cwd, allowProject: ctx.isProjectTrusted() }),
         ),
       );
   });
@@ -246,10 +284,16 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
   pi.on("resources_discover", (_event, ctx) => {
     cwd = ctx.cwd;
   });
-  pi.on("before_agent_start", (event, ctx) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     const agent = state.agent;
-    if (!agent) return;
     const options = event.systemPromptOptions;
+    delete options.sections.professional_role;
+    delete options.sections.agent_profile;
+    const role = effectiveRole(await catalogFor(ctx));
+    const contribution = rolePrompt(role);
+    if (contribution) options.sections.professional_role = contribution;
+    await status(ctx);
+    if (!agent) return;
     if (agent.skills !== undefined) {
       const allow = agent.skills === false ? [] : agent.skills;
       const unknown = allow.filter(
@@ -283,6 +327,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       }
     }
     try {
+      if ("error" in mention && mention.error) throw new Error(mention.error);
       if (!mention.agent)
         throw new Error(
           "Unknown delegation target. Use /delegate to select an agent.",
@@ -295,7 +340,12 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         throw new Error(
           `Add a task after @${mention.agent}, or use /delegate.`,
         );
-      await dispatch(ctx, mention.agent, mention.task);
+      await dispatch(
+        ctx,
+        mention.agent,
+        mention.task,
+        "role" in mention ? mention.role : undefined,
+      );
     } catch (error) {
       report(ctx, error);
       ctx.ui.setEditorText(event.text);
@@ -353,33 +403,129 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     },
   });
   pi.registerCommand("delegate", {
-    description: "Select a specialist or delegate: /delegate <agent> <task>",
+    description: "Delegate: /delegate <agent> [--role default|none|id] <task>",
     getArgumentCompletions: async (prefix) =>
-      (await discoverDelegates(cwd)).agents
-        .filter((a) => a.name.startsWith(prefix))
-        .map((a) => ({
-          value: a.name,
-          label: a.name,
-          description: a.description,
-        })),
+      await delegationCompletions(prefix),
     handler: async (args, ctx) => {
       if (!args.trim()) return open(ctx, true);
-      const match = args.trim().match(/^(\S+)\s+([\s\S]+)$/);
-      if (!match) {
-        ctx.ui.notify("Usage: /delegate <agent> <task>", "error");
-        return;
-      }
+      const match = args.trimStart().match(/^(\S+)(?:\s+([\s\S]*))?$/);
       try {
+        if (!match)
+          throw new Error(
+            "Usage: /delegate <agent> [--role default|none|id] <task>",
+          );
+        const parsed = parseRolePrefix(match[2] ?? "");
+        if (!parsed.task.trim()) throw new Error("Add a task for delegation.");
         if (
           !(await discoverDelegates(ctx.cwd)).agents.some(
             (a) => a.name === match[1],
           )
         )
           throw new Error(`Unknown subagent: ${match[1]}`);
-        await dispatch(ctx, match[1]!, match[2]!.trim());
+        await dispatch(ctx, match[1]!, parsed.task, parsed.role);
+      } catch (error) {
+        report(ctx, error);
+        ctx.ui.setEditorText(`/delegate ${args}`);
+      }
+    },
+  });
+  async function delegationCompletions(prefix: string) {
+    const match = prefix.match(/^\S+\s+--role(?:=|\s+)([a-z0-9._-]*)$/);
+    if (match) {
+      const catalog = await discoverRoles({ cwd });
+      return ["default", "none", ...catalog.roles.map((r) => r.id)]
+        .filter((id) => id.startsWith(match[1]!))
+        .map((id) => ({
+          value: prefix.slice(0, prefix.length - match[1]!.length) + id,
+          label: id,
+          description:
+            catalog.roles.find((r) => r.id === id)?.description ??
+            "Role for this task",
+        }));
+    }
+    return (await discoverDelegates(cwd)).agents
+      .filter((a) => a.name.startsWith(prefix))
+      .map((a) => ({
+        value: a.name,
+        label: a.name,
+        description: a.description,
+      }));
+  }
+  pi.registerCommand("role", {
+    description:
+      "Browse roles; /role <id|none|show> selects only in Pi default",
+    getArgumentCompletions: async (prefix) =>
+      ["none", "show", ...(await discoverRoles({ cwd })).roles.map((r) => r.id)]
+        .filter((id) => id.startsWith(prefix))
+        .map((id) => ({ value: id, label: id })),
+    handler: async (args, ctx) => {
+      try {
+        const catalog = await catalogFor(ctx);
+        if (args.trim() === "show")
+          return previewRole(ctx, effectiveRole(catalog));
+        if (state.agent) {
+          if (args.trim()) {
+            ctx.ui.notify(
+              "Role from agent configuration. Use /agent reset to select a role for Pi default.",
+              "info",
+            );
+            return;
+          }
+          const id = await pickRole(
+            ctx,
+            catalog,
+            effectiveRole(catalog).effectiveId,
+            state.agent.role,
+            false,
+            true,
+          );
+          if (id) await previewRole(ctx, resolveRole(catalog, undefined, id));
+          return;
+        }
+        if (!ctx.isIdle())
+          throw new Error(
+            "Wait for the current turn to finish before selecting a role.",
+          );
+        const id =
+          args.trim() ||
+          (await pickRole(ctx, catalog, state.baseConversationRole));
+        if (!id) return;
+        const role = resolveRole(catalog, undefined, id, "base-conversation");
+        state.baseConversationRole =
+          role.requested.kind === "named" ? role.requested.id : undefined;
+        state.persist(pi);
+        await status(ctx);
+        ctx.ui.notify(
+          `Role: ${role.displayName ?? "None"}${role.status === "missing" || role.status === "invalid" || role.status === "unreadable" ? ` (${role.status}: ${role.requestedId})` : ""}`,
+          "info",
+        );
       } catch (error) {
         report(ctx, error);
       }
+    },
+  });
+  pi.registerCommand("roles", {
+    description: "List role metadata and diagnostics: /roles [refresh|query]",
+    handler: async (args, ctx) => {
+      const catalog = await catalogFor(ctx);
+      const query = args.trim() === "refresh" ? "" : args.trim().toLowerCase();
+      ctx.ui.notify(
+        [
+          ...catalog.roles
+            .filter((r) =>
+              `${r.id} ${r.name} ${r.description} ${r.category}`
+                .toLowerCase()
+                .includes(query),
+            )
+            .map(
+              (r) =>
+                `${r.id} — ${r.name} (${r.source}) · ${r.category} · ${r.description}`,
+            ),
+          ...catalog.diagnostics,
+        ].join("\n") || "No roles installed.",
+        "info",
+      );
+      await status(ctx);
     },
   });
 }

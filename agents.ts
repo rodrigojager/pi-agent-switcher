@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { declaredRole } from "pi-subagent-runtime/roles";
 import {
   getAgentDir,
   parseFrontmatter,
@@ -7,6 +8,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 export interface AgentConfig {
+  role?: string;
+  roleDiagnostic?: string;
   name: string;
   description: string;
   systemPrompt: string;
@@ -85,6 +88,10 @@ export function parseAgent(
     name: f.name,
     description: f.description.trim(),
     systemPrompt: body.trim(),
+    role: declaredRole(f.role),
+    ...(f.role != null && f.role !== "" && !declaredRole(f.role)
+      ? { roleDiagnostic: "Invalid optional role ID; ignored" }
+      : {}),
     tools: list(f.tools, "tools"),
     skills: f.skills === false ? false : list(f.skills, "skills"),
     thinking: thinking as AgentConfig["thinking"],
@@ -140,9 +147,15 @@ async function load(
     )
       continue;
     try {
-      result.push(
-        parseAgent(await readFile(file, "utf8"), file, source, shared),
+      const agent = parseAgent(
+        await readFile(file, "utf8"),
+        file,
+        source,
+        shared,
       );
+      result.push(agent);
+      if (agent.roleDiagnostic)
+        diagnostics.push(`${file}: ${agent.roleDiagnostic}`);
     } catch (error) {
       diagnostics.push(
         `${file}: ${error instanceof Error ? error.message : String(error)}`,

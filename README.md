@@ -98,3 +98,16 @@ npm test
 Tests cover discovery/precedence, real input filtering, bold names, terminal width/height, immediate switching and reset, skill catalog visibility, branch restoration, mentions, file completion, and an end-to-end SDK session with an actual child process. The end-to-end provider is offline: it produces deterministic responses and makes no network or paid model requests.
 
 License: MIT.
+# Professional roles
+
+Requires `rodrigojager/pi-subagent` **0.13.0-rodrigo.1** or newer. Its role core is a production dependency; no third extension is registered.
+
+Add `role: backend-architect` to an agent's frontmatter. A named main agent always uses its own default. `/role` browses roles; `/role show` previews; `/roles [refresh|query]` lists catalog metadata and diagnostics. To select an independent main role, use `/agent reset`, then `/role <id>` or `/role none`. Base role state follows the active session branch and never overrides named agents or children.
+
+Per-task examples: `@executor --role code-reviewer Review this`, `@agent:executor --role=none Implement this`, `/delegate executor --role default Implement this`, and `/run executor --role code-reviewer Review this`. Omitted/default uses the child's own agent role; none disables it; a named ID overrides just that invocation. Missing roles silently yield None, without fallback or stale state. `--` ends prefix option parsing; flags later in task prose remain literal. The delegation dialog starts at Default every time, and Escape cancels.
+
+The `subagent` tool accepts `{"agent":"executor","role":"code-reviewer","task":"Review the endpoint"}`. Discover IDs using the read-only `roles` tool. Roles change no model, effort, tools, skills, or extensions. New switcher dispatch uses the v2 bridge and fails clearly against old runtimes instead of silently dropping role choices.
+
+Roles are recursively discovered under `getAgentDir()/roles` and the nearest trusted ancestor `.pi/roles`, independently of agent scope. Project IDs shadow user IDs; malformed/duplicate entries have inspectable diagnostics. Only one selected body enters the prompt, and it refreshes at the next turn; role changes do not erase chat history. Status, pickers, job/result cards and `/jobs` show the effective captured role.
+
+Import Agency Agents from the subagent package with `bun run roles:import -- --source <checkout> --scope user --all` (preview with `--list`, simulate with `--dry-run`, update unedited managed files with `--update`). English bodies, license, hashes and revision are preserved; edited/custom files are conflicts. See the subagent [roles guide](https://github.com/rodrigojager/pi-subagent/blob/main/docs/roles.md) and its bundled `pi-subagent-usage` skill.

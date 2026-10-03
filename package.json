@@ -1,6 +1,6 @@
 {
   "name": "pi-agent-switcher",
-  "version": "0.3.0-rodrigo.2",
+  "version": "0.4.0-rodrigo.1",
   "description": "Searchable primary-agent picker with skill profiles and delegation to Rodrigo's Pi subagents",
   "type": "module",
   "main": "index.ts",
@@ -25,7 +25,8 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=1.0.0",
@@ -36,9 +37,11 @@
     "@earendil-works/pi-tui": "1.0.0",
     "@types/node": "^26.0.0",
     "jiti": "^2.7.0",
-    "pi-subagent-runtime": "github:rodrigojager/pi-subagent#v0.12.4-rodrigo.2",
     "prettier": "^3.9.9",
     "typescript": "^7.0.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "pi-subagent-runtime": "github:rodrigojager/pi-subagent#26f229a4be5691a04ce68dfb978c4042a7376cf0"
+  }
 }
