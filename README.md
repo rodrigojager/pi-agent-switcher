@@ -9,7 +9,7 @@ Derived from `pi-agent-switcher@0.2.1` by `byack`, maintained in [KunCheng-He/kk
 Requires Pi 1.0.0 or newer. For delegation, use [Rodrigo's Pi Subagent](https://github.com/rodrigojager/pi-subagent) `v0.12.4-rodrigo.2` or newer.
 
 ```sh
-pi install https://github.com/rodrigojager/pi-agent-switcher@v0.3.0-rodrigo.2
+pi install https://github.com/rodrigojager/pi-agent-switcher
 ```
 
 If Pi is already open, use `/reload` after active work finishes. The package does not reload Pi or stop existing jobs automatically. Enable one agent-switcher implementation at a time, since `/agent` and `Alt+A` are shared command/shortcut names.
@@ -19,6 +19,8 @@ If Pi is already open, use `/reload` after active work finishes. The package doe
 | Action                               | Command or key                               |
 | ------------------------------------ | -------------------------------------------- |
 | Open the searchable main-agent popup | **Alt+A** or `/agent`                        |
+| Open the searchable role popup       | **Alt+R** or `/role`                         |
+| Select provider/model from Pi's list | **Alt+M** (configure below) or `Ctrl+L`      |
 | Activate a main profile directly     | `/agent <name>`                              |
 | Restore the original Pi profile      | `/agent reset`                               |
 | List profiles and descriptions       | `/agents`                                    |
@@ -29,6 +31,20 @@ If Pi is already open, use `/reload` after active work finishes. The package doe
 The popup displays **bold agent names** followed by descriptions. Type to filter by either field; multi-word searches and accents work. Use ↑/↓, Enter, and Esc. Numbers remain searchable characters. The active profile is marked, and `Pi default` restores the original session settings. `Ctrl+A` and `Ctrl+P` retain their Pi functions.
 
 `@` completion adds specialist suggestions alongside Pi's file suggestions. Completing an agent inserts the explicit `@agent:<name>` form, avoiding file-name ambiguity. A bare `@<name>` works at the start of a message when a matching agent exists and there is no file with that name. `@README.md`, path references, and mentions elsewhere in a sentence keep normal Pi behavior.
+
+## Shortcuts and footer
+
+The footer displays active agent names in bold accent color and active role names in bold success color, with muted labels and dim `Pi default`/`None` values. Colors follow the selected Pi theme. RPC status text stays plain.
+
+To bind **Alt+M** to Pi's native provider/model list, merge the following entry into `~/.pi/agent/keybindings.json`, preserving any other settings and custom model-selector keys:
+
+```json
+{
+  "app.model.select": ["ctrl+l", "alt+m"]
+}
+```
+
+The same example is bundled in `examples/keybindings.json`. Use `/reload` when idle to apply keybindings and extension updates. The native selector lists available models with their providers and preserves Pi's authentication and per-profile manual model choices.
 
 ## Agent definitions
 

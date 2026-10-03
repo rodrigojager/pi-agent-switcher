@@ -118,6 +118,7 @@ function host(cwd) {
     },
     sessionManager: { getBranch: () => branch },
     ui: {
+      theme: { fg: (_color, text) => text, bold: (text) => text },
       notify(message, type) {
         notifications.push({ message, type });
       },
@@ -193,6 +194,106 @@ test("roles command shows names and descriptions without IDs or User labels, ret
     await fs.unlink(path.join(folder, id + ".md"));
     await fs.unlink(path.join(folder, id + "-more.md"));
   }
+});
+
+test("status highlights effective agent and role separately, dims defaults and keeps RPC plain", async () => {
+  const { getThemeByName } =
+    await import("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js");
+  const theme = getThemeByName("dark");
+  const cwd = await fixture();
+  await writeRole(
+    path.join(cwd, ".pi/roles"),
+    "reviewer",
+    "---\nname: Review Specialist\ndescription: Review changes.\n---\nReview.",
+  );
+  await writeAgent(path.join(cwd, ".pi/agents"), "architect", "role: reviewer");
+  const h = host(cwd);
+  h.ctx.ui.theme = theme;
+  await h.command("agent", "architect");
+  assert.ok(
+    h.state.status.includes(theme.bold(theme.fg("accent", "architect"))),
+  );
+  assert.ok(
+    h.state.status.includes(
+      theme.bold(theme.fg("success", "Review Specialist")),
+    ),
+  );
+  assert.notEqual(theme.fg("accent", "x"), theme.fg("success", "x"));
+  assert.notEqual(theme.fg("muted", "x"), theme.fg("accent", "x"));
+  assert.equal(
+    h.state.status.replace(/\x1b\[[0-9;]*m/g, ""),
+    "Agent: architect | Role: Review Specialist",
+  );
+  await h.command("agent", "reset");
+  assert.ok(h.state.status.includes(theme.fg("dim", "Pi default")));
+  assert.ok(h.state.status.includes(theme.fg("dim", "None")));
+  h.ctx.mode = "rpc";
+  await h.command("agent", "architect");
+  assert.equal(h.state.status, "Agent: architect | Role: Review Specialist");
+});
+
+test("Alt+R selects the base role without changing execution settings and browses named agents read-only", async () => {
+  const cwd = await fixture();
+  await writeRole(
+    path.join(cwd, ".pi/roles"),
+    "reviewer",
+    "---\nname: Review Specialist\ndescription: Review changes.\n---\nREVIEW_BODY",
+  );
+  await writeAgent(path.join(cwd, ".pi/agents"), "architect", "role: reviewer");
+  const h = host(cwd);
+  h.ctx.mode = "rpc";
+  const dialogs = [];
+  h.ctx.ui.select = async (title, choices) => {
+    dialogs.push(title);
+    return choices.find((choice) => choice.includes("Review Specialist"));
+  };
+  const shortcut = () => h.shortcuts.get("alt+r").handler(h.ctx);
+  await shortcut();
+  assert.equal(h.state.branch.at(-1).data.baseConversationRole, "reviewer");
+  assert.equal(h.state.model.id, "base");
+  assert.deepEqual(h.state.tools, ["read", "write", "subagent"]);
+  const options = promptOptions();
+  await h.emit("before_agent_start", { systemPromptOptions: options });
+  assert.match(options.sections.professional_role, /REVIEW_BODY/);
+  await h.command("agent", "architect");
+  const branch = structuredClone(h.state.branch);
+  await shortcut();
+  assert.match(dialogs.at(-2), /Role from agent configuration/);
+  assert.match(dialogs.at(-1), /REVIEW_BODY/);
+  assert.deepEqual(h.state.branch, branch);
+});
+
+test("Alt+R guards busy turns and duplicate dialogs; cancellation releases the picker lock", async () => {
+  const h = host(await fixture());
+  h.ctx.mode = "rpc";
+  let opened = 0,
+    cancel;
+  h.ctx.ui.select = async () => {
+    opened++;
+    return new Promise((resolve) => {
+      cancel = resolve;
+    });
+  };
+  const shortcut = () => h.shortcuts.get("alt+r").handler(h.ctx);
+  h.setIdle(false);
+  await shortcut();
+  assert.equal(opened, 0);
+  assert.match(h.notifications.at(-1).message, /current turn/);
+  h.setIdle(true);
+  const pending = shortcut();
+  while (!cancel) await new Promise((resolve) => setImmediate(resolve));
+  await shortcut();
+  await h.shortcuts.get("alt+a").handler(h.ctx);
+  assert.equal(opened, 1);
+  cancel(undefined);
+  await pending;
+  assert.equal(h.state.branch.length, 0);
+  h.ctx.ui.select = async () => {
+    opened++;
+    return undefined;
+  };
+  await shortcut();
+  assert.equal(opened, 2);
 });
 
 test("base roles are branch-aware, named agents own their defaults, and missing roles clear only the owned section", async () => {

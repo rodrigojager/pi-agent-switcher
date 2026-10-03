@@ -60,6 +60,7 @@ try {
     [
       "--test",
       path.join(root, "tests", "role-picker.test.mjs"),
+      path.join(root, "tests", "keybindings.test.mjs"),
       path.join(root, "tests", "sdk.test.mjs"),
     ],
     {

@@ -1,5 +1,11 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.4
+
+- Highlight the active agent and role with separate theme colors and bold names; dim labels and inactive defaults. Keep RPC status text plain.
+- Add Alt+R to the existing role picker, sharing command behavior and popup guards with Alt+A.
+- Bundle the native Alt+M model-selector keybinding example, retaining Ctrl+L; document configuration and reload.
+
 ## 0.4.0-rodrigo.3
 
 - Separate role entries with a blank line in the picker and `/roles` output.

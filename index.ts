@@ -44,9 +44,14 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         );
   const status = async (ctx: ExtensionContext) => {
     const role = effectiveRole(await catalogFor(ctx));
+    const agentName = state.agent?.name ?? "Pi default";
+    const roleName = role.displayName ?? "None";
+    const theme = ctx.ui.theme;
     ctx.ui.setStatus(
       "agent-switcher",
-      `Agent: ${state.agent?.name ?? "Pi default"} | Role: ${role.displayName ?? "None"}`,
+      ctx.mode === "tui"
+        ? `${theme.fg("muted", "Agent:")} ${state.agent ? theme.bold(theme.fg("accent", agentName)) : theme.fg("dim", agentName)} ${theme.fg("muted", "| Role:")} ${role.displayName ? theme.bold(theme.fg("success", roleName)) : theme.fg("dim", roleName)}`
+        : `Agent: ${agentName} | Role: ${roleName}`,
     );
   };
   const report = (ctx: ExtensionContext, error: unknown) =>
@@ -356,6 +361,10 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     description: "Search and switch main agent",
     handler: async (ctx) => open(ctx),
   });
+  pi.registerShortcut("alt+r", {
+    description: "Search and select a role; browse an agent's role read-only",
+    handler: async (ctx) => openRole("", ctx),
+  });
   const completions = async (prefix: string) =>
     (await discoverAgents(cwd)).agents
       .filter(
@@ -451,6 +460,55 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         description: a.description,
       }));
   }
+  async function openRole(args: string, ctx: ExtensionContext) {
+    if (selecting) return;
+    selecting = true;
+    try {
+      const catalog = await catalogFor(ctx);
+      if (args.trim() === "show")
+        return previewRole(ctx, effectiveRole(catalog));
+      if (state.agent) {
+        if (args.trim()) {
+          ctx.ui.notify(
+            "Role from agent configuration. Use /agent reset to select a role for Pi default.",
+            "info",
+          );
+          return;
+        }
+        const id = await pickRole(
+          ctx,
+          catalog,
+          effectiveRole(catalog).effectiveId,
+          state.agent.role,
+          false,
+          true,
+        );
+        if (id) await previewRole(ctx, resolveRole(catalog, undefined, id));
+        return;
+      }
+      if (!ctx.isIdle())
+        throw new Error(
+          "Wait for the current turn to finish before selecting a role.",
+        );
+      const id =
+        args.trim() ||
+        (await pickRole(ctx, catalog, state.baseConversationRole));
+      if (!id) return;
+      const role = resolveRole(catalog, undefined, id, "base-conversation");
+      state.baseConversationRole =
+        role.requested.kind === "named" ? role.requested.id : undefined;
+      state.persist(pi);
+      await status(ctx);
+      ctx.ui.notify(
+        `Role: ${role.displayName ?? "None"}${role.status === "missing" || role.status === "invalid" || role.status === "unreadable" ? ` (${role.status}: ${role.requestedId})` : ""}`,
+        "info",
+      );
+    } catch (error) {
+      report(ctx, error);
+    } finally {
+      selecting = false;
+    }
+  }
   pi.registerCommand("role", {
     description:
       "Browse roles; /role <id|none|show> selects only in Pi default",
@@ -458,51 +516,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       ["none", "show", ...(await discoverRoles({ cwd })).roles.map((r) => r.id)]
         .filter((id) => id.startsWith(prefix))
         .map((id) => ({ value: id, label: id })),
-    handler: async (args, ctx) => {
-      try {
-        const catalog = await catalogFor(ctx);
-        if (args.trim() === "show")
-          return previewRole(ctx, effectiveRole(catalog));
-        if (state.agent) {
-          if (args.trim()) {
-            ctx.ui.notify(
-              "Role from agent configuration. Use /agent reset to select a role for Pi default.",
-              "info",
-            );
-            return;
-          }
-          const id = await pickRole(
-            ctx,
-            catalog,
-            effectiveRole(catalog).effectiveId,
-            state.agent.role,
-            false,
-            true,
-          );
-          if (id) await previewRole(ctx, resolveRole(catalog, undefined, id));
-          return;
-        }
-        if (!ctx.isIdle())
-          throw new Error(
-            "Wait for the current turn to finish before selecting a role.",
-          );
-        const id =
-          args.trim() ||
-          (await pickRole(ctx, catalog, state.baseConversationRole));
-        if (!id) return;
-        const role = resolveRole(catalog, undefined, id, "base-conversation");
-        state.baseConversationRole =
-          role.requested.kind === "named" ? role.requested.id : undefined;
-        state.persist(pi);
-        await status(ctx);
-        ctx.ui.notify(
-          `Role: ${role.displayName ?? "None"}${role.status === "missing" || role.status === "invalid" || role.status === "unreadable" ? ` (${role.status}: ${role.requestedId})` : ""}`,
-          "info",
-        );
-      } catch (error) {
-        report(ctx, error);
-      }
-    },
+    handler: openRole,
   });
   pi.registerCommand("roles", {
     description: "List role metadata and diagnostics: /roles [refresh|query]",
