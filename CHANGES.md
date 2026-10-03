@@ -1,5 +1,11 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.2
+
+- Display roles as two-line entries, with the name above the description.
+- Hide role IDs, categories, and the User scope label from role rows; retain ID/category search and Project markers.
+- Show the active role's name and simplify `/roles` output without changing selection IDs, agent picker layout, or role execution.
+
 ## 0.3.0-rodrigo.2
 
 - Treat profile model and thinking as defaults: retain manual Pi model/thinking selections per profile on the session branch.

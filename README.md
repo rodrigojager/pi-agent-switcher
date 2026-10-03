@@ -104,6 +104,8 @@ Requires `rodrigojager/pi-subagent` **0.13.0-rodrigo.1** or newer. Its role core
 
 Add `role: backend-architect` to an agent's frontmatter. A named main agent always uses its own default. `/role` browses roles; `/role show` previews; `/roles [refresh|query]` lists catalog metadata and diagnostics. To select an independent main role, use `/agent reset`, then `/role <id>` or `/role none`. Base role state follows the active session branch and never overrides named agents or children.
 
+The role picker uses two-line entries: the name first, then a full-width description. IDs, categories, and the repetitive User scope label do not consume description space; ID and category searches still work. The active role is shown by name. Project roles retain a Project marker, and `/roles` uses the same name/description order. Agent pickers keep their existing layout.
+
 Per-task examples: `@executor --role code-reviewer Review this`, `@agent:executor --role=none Implement this`, `/delegate executor --role default Implement this`, and `/run executor --role code-reviewer Review this`. Omitted/default uses the child's own agent role; none disables it; a named ID overrides just that invocation. Missing roles silently yield None, without fallback or stale state. `--` ends prefix option parsing; flags later in task prose remain literal. The delegation dialog starts at Default every time, and Escape cancels.
 
 The `subagent` tool accepts `{"agent":"executor","role":"code-reviewer","task":"Review the endpoint"}`. Discover IDs using the read-only `roles` tool. Roles change no model, effort, tools, skills, or extensions. New switcher dispatch uses the v2 bridge and fails clearly against old runtimes instead of silently dropping role choices.

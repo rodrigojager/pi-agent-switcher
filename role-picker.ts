@@ -17,9 +17,10 @@ export function pickRole(
   readonly = false,
 ) {
   const roles = catalog.roles.map((r) => ({
-    name: r.name,
+    name: r.source === "project" ? `${r.name} · Project` : r.name,
     value: r.id,
-    description: `${r.id} · ${r.category} · ${r.source === "project" ? "Project" : "User"} · ${r.description}`,
+    description: r.description,
+    searchText: `${r.id} ${r.category}`,
   }));
   const choices = delegation
     ? [
@@ -48,6 +49,7 @@ export function pickRole(
       : delegation
         ? "Role for this task"
         : "Role for Pi default",
+    "cards",
   );
 }
 

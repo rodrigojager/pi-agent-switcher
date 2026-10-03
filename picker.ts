@@ -14,6 +14,7 @@ export interface PickerItem {
   name: string;
   description: string;
   value: string;
+  searchText?: string;
 }
 function normalize(text: string) {
   return text
@@ -25,7 +26,9 @@ export function filterItems(items: PickerItem[], query: string) {
   const words = normalize(query).trim().split(/\s+/).filter(Boolean);
   return items.filter((item) =>
     words.every((word) =>
-      normalize(`${item.name} ${item.description}`).includes(word),
+      normalize(
+        `${item.name} ${item.description} ${item.searchText ?? ""}`,
+      ).includes(word),
     ),
   );
 }
@@ -45,6 +48,7 @@ export class AgentPicker {
     private tui: Pick<TUI, "requestRender"> & { terminal?: { rows: number } },
     private theme: Theme,
     private done: (result: string | null) => void,
+    private layout: "auto" | "cards" = "auto",
   ) {
     this.matches = items;
     this.selected = Math.max(
@@ -96,7 +100,9 @@ export class AgentPicker {
     const lines = [
       this.theme.fg("accent", "─".repeat(w)),
       line(this.theme.bold(this.title)),
-      line(`Active: ${this.current ?? "Pi default"}`),
+      line(
+        `Active: ${this.items.find((item) => item.value === this.current)?.name ?? (this.layout === "cards" && this.current ? "Unavailable role" : (this.current ?? "Pi default"))}`,
+      ),
       ...this.input.render(inner).map(line),
       "",
     ];
@@ -105,10 +111,12 @@ export class AgentPicker {
       Math.floor((this.tui.terminal?.rows ?? 40) * 0.8) - 9,
     );
     const entryRows =
-      inner >= 60 &&
-      this.matches.every((item) => visibleWidth(item.name) + 15 < inner)
-        ? 1
-        : 3;
+      this.layout === "cards"
+        ? 2
+        : inner >= 60 &&
+            this.matches.every((item) => visibleWidth(item.name) + 15 < inner)
+          ? 1
+          : 3;
     const maxVisible = Math.max(
       1,
       Math.min(7, Math.floor(rowBudget / entryRows)),
@@ -131,7 +139,14 @@ export class AgentPicker {
       const badge = item.value === this.current ? " · active" : "";
       const label = `${prefix}${name}${badge}`;
       const description = item.description.replace(/[\r\n]+/g, " ");
-      if (visibleWidth(label) + 5 < inner && inner >= 60) {
+      if (this.layout === "cards") {
+        lines.push(
+          line(i === this.selected ? this.theme.fg("accent", label) : label),
+          line(
+            `  ${this.theme.fg("muted", truncateToWidth(description, Math.max(1, inner - 2)))}`,
+          ),
+        );
+      } else if (visibleWidth(label) + 5 < inner && inner >= 60) {
         lines.push(
           line(
             `${i === this.selected ? this.theme.fg("accent", label) : label}  ${this.theme.fg("muted", truncateToWidth(description, inner - visibleWidth(label) - 2))}`,
@@ -229,6 +244,7 @@ export async function pickItems(
   items: PickerItem[],
   current: string | undefined,
   title: string,
+  layout: "auto" | "cards" = "auto",
 ) {
   if (!ctx.hasUI) return null;
   if (ctx.mode !== "tui") {
@@ -238,7 +254,7 @@ export async function pickItems(
   }
   return ctx.ui.custom<string | null>(
     (tui, theme, _keys, done) =>
-      new AgentPicker(items, current, title, tui, theme, done),
+      new AgentPicker(items, current, title, tui, theme, done, layout),
     {
       overlay: true,
       overlayOptions: {

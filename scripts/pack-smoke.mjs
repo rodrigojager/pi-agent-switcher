@@ -57,7 +57,11 @@ try {
     await readFile(path.join(runtimeRoot, file));
   const output = execFileSync(
     process.execPath,
-    ["--test", path.join(root, "tests", "sdk.test.mjs")],
+    [
+      "--test",
+      path.join(root, "tests", "role-picker.test.mjs"),
+      path.join(root, "tests", "sdk.test.mjs"),
+    ],
     {
       cwd: root,
       encoding: "utf8",

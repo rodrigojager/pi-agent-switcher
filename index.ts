@@ -519,7 +519,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
             )
             .map(
               (r) =>
-                `${r.id} — ${r.name} (${r.source}) · ${r.category} · ${r.description}`,
+                `${r.name}${r.source === "project" ? " · Project" : ""}\n  ${r.description}`,
             ),
           ...catalog.diagnostics,
         ].join("\n") || "No roles installed.",

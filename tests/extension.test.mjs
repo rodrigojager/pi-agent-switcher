@@ -167,6 +167,28 @@ function host(cwd) {
   };
 }
 
+test("roles command shows names and descriptions without IDs or User labels, retaining ID search", async () => {
+  const folder = path.join(temp, "user/roles");
+  const id = "hidden-listing-id";
+  await writeRole(
+    folder,
+    id,
+    "---\nname: Readable Specialist\ndescription: Investigate failures with objective evidence.\ncategory: engineering\n---\nInvestigate.\n",
+  );
+  try {
+    const h = host(await fixture());
+    await h.command("roles", id);
+    const text = h.notifications.at(-1).message;
+    assert.equal(
+      text,
+      "Readable Specialist\n  Investigate failures with objective evidence.",
+    );
+    assert.doesNotMatch(text, /hidden-listing-id|\(user\)|engineering/);
+  } finally {
+    await fs.unlink(path.join(folder, id + ".md"));
+  }
+});
+
 test("base roles are branch-aware, named agents own their defaults, and missing roles clear only the owned section", async () => {
   const cwd = await fixture();
   await writeRole(
