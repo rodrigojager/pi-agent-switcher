@@ -1,5 +1,16 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.7
+
+- Disable all automatic skill metadata in the provided profiles and explicit children, including the previous small initial catalog.
+- Add global on-demand discovery mode for Pi default/reset and remove old system catalog patches from outgoing context.
+- Keep profile-specific local skill_catalog/skill_load access without moving shared libraries or changing other clients.
+- Explicitly include the shared .agents/skills library in local lookup so Superbuild and Blender remain discoverable when native metadata discovery is disabled.
+- Resolve Pi skill junctions to physical paths for family permissions and relative references, keeping flattened aliases usable without leaking other families.
+- Omit stale skill discovery results after switching profiles. Preserve explicitly loaded instructions needed by the current task.
+- Add an upgrade installer that preserves agent prompts, models, thinking defaults and the configured new-session default.
+- Capture real offline SDK requests to verify zero automatic catalogs, permitted on-demand loading, denied cross-profile loading and reset behavior.
+
 ## 0.4.0-rodrigo.6
 
 - Add nine dedicated profiles: separate Astra planner and Sol orchestrator, Luna executor/reviewer/operators, user-only scout, and adjustable Higgsfield/Blender specialists.

@@ -7,7 +7,7 @@ thinking: high
 mode: both
 resource_profile: higgsfield-specialist
 tools: read, write, profile_mcp, skill_catalog, skill_load
-skills: higgsfield
+skills: false
 extensions: profile-provider, profile-higgsfield-specialist
 context: false
 ---

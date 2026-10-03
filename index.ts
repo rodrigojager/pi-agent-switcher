@@ -31,6 +31,16 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export default function agentSwitcherExtension(pi: ExtensionAPI) {
   const state = new AgentStateManager();
+  async function onDemandSkills() {
+    try {
+      const config = JSON.parse(
+        await readFile(path.join(getAgentDir(), "agent-profiles.json"), "utf8"),
+      );
+      return config.skillDiscoveryMode === "on-demand";
+    } catch {
+      return false;
+    }
+  }
   registerProfileResources(pi, () =>
     state.agent
       ? {
@@ -321,6 +331,8 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     const agent = state.agent;
     const options = event.systemPromptOptions;
+    const lazySkills = !!agent?.resourceProfile || (await onDemandSkills());
+    if (lazySkills) options.skills = [];
     delete options.sections.professional_role;
     delete options.sections.agent_profile;
     const role = effectiveRole(await catalogFor(ctx));
@@ -328,7 +340,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     if (contribution) options.sections.professional_role = contribution;
     await status(ctx);
     if (!agent) return;
-    if (agent.skills !== undefined) {
+    if (agent.skills !== undefined && !lazySkills) {
       const allow = agent.skills === false ? [] : agent.skills;
       const unknown = allow.filter(
         (name) => !options.skills.some((skill) => skill.name === name),
@@ -344,6 +356,27 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     }
     if (agent.context === false) options.contextFiles = [];
     options.sections.agent_profile = `Active main agent: ${agent.name}\n\n${agent.systemPrompt}`;
+  });
+  pi.on("context_with_system", async (event) => {
+    if (!state.agent?.resourceProfile && !(await onDemandSkills())) return;
+    // Also remove old catalog patches when reloading an existing conversation.
+    // Explicitly loaded skill results and user text remain task evidence.
+    const strip = (value: string) =>
+      value.replace(/<skills>[\s\S]*?<\/skills>/g, "");
+    return {
+      messages: event.messages.map((message) =>
+        message.role === "system"
+          ? {
+              ...message,
+              sections: { ...message.sections, skills: null },
+              content:
+                typeof message.content === "string"
+                  ? strip(message.content)
+                  : message.content.map((c) => ({ ...c, text: strip(c.text) })),
+            }
+          : message,
+      ),
+    };
   });
   pi.on("input", async (event, ctx) => {
     if (event.source !== "interactive") return { action: "continue" };

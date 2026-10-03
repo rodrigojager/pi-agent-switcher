@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import {
@@ -62,8 +63,17 @@ export const POLICIES: Record<string, Policy> = {
     mcp: "mcp__blender__",
   },
 };
+const physicalPath = (value: string) => {
+  let resolved = path.resolve(value);
+  try {
+    resolved = realpathSync.native(resolved);
+  } catch {
+    /* Missing paths remain comparable. */
+  }
+  return resolved;
+};
 const normalized = (value: string) =>
-  path.resolve(value).replace(/\\/g, "/").toLowerCase();
+  physicalPath(value).replace(/\\/g, "/").toLowerCase();
 const beneath = (file: string, root: string) =>
   normalized(file).startsWith(normalized(root) + "/");
 export function skillAllowed(
@@ -144,6 +154,7 @@ export function registerProfileResources(
       includeDefaults: true,
       skillPaths: [
         ...configured,
+        shared,
         path.join(shared, "higgsfield", "skills"),
         ...(allowProject
           ? [path.join(cwd, "SKILLS"), path.join(cwd, "skills")]
@@ -183,15 +194,18 @@ export function registerProfileResources(
       );
       const offset = args.offset ?? 0,
         limit = args.limit ?? 5;
-      return json({
-        skills: matches
-          .slice(offset, offset + limit)
-          .map((s) => ({ name: s.name, description: s.description })),
-        total: matches.length,
-        ...(offset + limit < matches.length
-          ? { nextOffset: offset + limit }
-          : {}),
-      });
+      return {
+        ...json({
+          skills: matches
+            .slice(offset, offset + limit)
+            .map((s) => ({ name: s.name, description: s.description })),
+          total: matches.length,
+          ...(offset + limit < matches.length
+            ? { nextOffset: offset + limit }
+            : {}),
+        }),
+        details: { profileSkillCatalog: { scope: current()?.scope } },
+      };
     },
   });
   pi.registerTool({
@@ -207,15 +221,16 @@ export function registerProfileResources(
       );
       if (!skill)
         throw new Error(`Skill is unavailable in this profile: ${args.name}`);
+      const filePath = physicalPath(skill.filePath);
       return {
         content: [
           {
             type: "text" as const,
-            text: `Skill: ${skill.name}\nBase directory: ${skill.baseDir}\n\n${await readFile(skill.filePath, "utf8")}`,
+            text: `Skill: ${skill.name}\nBase directory: ${path.dirname(filePath)}\n\n${await readFile(filePath, "utf8")}`,
           },
         ],
         details: {
-          profileSkill: { name: skill.name, filePath: skill.filePath },
+          profileSkill: { name: skill.name, filePath },
         },
       };
     },
@@ -329,6 +344,7 @@ export function registerProfileResources(
     const profile = current(),
       scope = profile?.scope;
     if (!scope || !POLICIES[scope]) return;
+    event.systemPromptOptions.skills = [];
     const optional = POLICIES[scope].optionalTools ?? [];
     const configured = new Set(pi.getAllTools().map((t) => t.name));
     const tools = [
@@ -434,6 +450,20 @@ export function registerProfileResources(
           };
         }
         if (message.role !== "toolResult") return message;
+        const catalogScope = (
+          message.details as
+            { profileSkillCatalog?: { scope?: string } } | undefined
+        )?.profileSkillCatalog?.scope;
+        if (catalogScope && catalogScope !== scope)
+          return {
+            ...message,
+            content: [
+              {
+                type: "text" as const,
+                text: "Skill discovery results from another profile were omitted from this request.",
+              },
+            ],
+          };
         const detail = (
           message.details as
             { profileSkill?: { name: string; filePath: string } } | undefined

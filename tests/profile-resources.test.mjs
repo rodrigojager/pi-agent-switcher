@@ -96,6 +96,98 @@ test("resource boundaries exclude other families, review staging and automatic s
   assert.equal(automaticDelegateAllowed("workspace-scout"), false);
   assert.equal(automaticDelegateAllowed("executor"), true);
 });
+test("on-demand catalog reaches the shared agents library without advertising other families", async () => {
+  const temp = await fs.mkdtemp(
+      path.join(os.tmpdir(), "profile-shared-library-"),
+    ),
+    agentDir = path.join(temp, "home/.pi/agent"),
+    shared = path.join(temp, "home/.agents/skills"),
+    old = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    for (const [relative, name] of [
+      ["superbuild", "superbuild"],
+      ["blender-arjun/animation", "animation"],
+    ]) {
+      const folder = path.join(shared, relative);
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(
+        path.join(folder, "SKILL.md"),
+        `---\nname: ${name}\ndescription: Shared ${name} procedure\n---\nSHARED_BODY_${name}`,
+      );
+    }
+    await fs.mkdir(path.join(agentDir, "skills"), { recursive: true });
+    await fs.symlink(
+      path.join(shared, "blender-arjun/animation"),
+      path.join(agentDir, "skills/animation"),
+      "junction",
+    );
+    const tools = new Map();
+    let scope = "planner";
+    registerProfileResources(
+      { registerTool: (t) => tools.set(t.name, t), on() {} },
+      () => ({ name: scope, scope }),
+    );
+    const ctx = {
+      cwd: path.join(temp, "project"),
+      isProjectTrusted: () => true,
+    };
+    const lookup = async (query) =>
+      JSON.parse(
+        (
+          await tools
+            .get("skill_catalog")
+            .execute("id", { query }, undefined, undefined, ctx)
+        ).content[0].text,
+      ).skills.map((s) => s.name);
+    assert.deepEqual(await lookup("superbuild"), ["superbuild"]);
+    assert.deepEqual(await lookup("animation"), []);
+    scope = "blender-specialist";
+    assert.deepEqual(await lookup("animation"), ["animation"]);
+    const loaded = await tools
+      .get("skill_load")
+      .execute("id", { name: "animation" }, undefined, undefined, ctx);
+    assert.match(JSON.stringify(loaded), /SHARED_BODY_animation/);
+    const expectedBase = await fs.realpath(
+      path.join(shared, "blender-arjun/animation"),
+    );
+    assert.ok(
+      loaded.content[0].text.includes(`Base directory: ${expectedBase}`),
+      "Relative references must resolve under the shared family, not the flat Pi alias",
+    );
+    scope = "orchestrator";
+    assert.deepEqual(await lookup("superbuild"), []);
+  } finally {
+    if (old === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = old;
+    await fs.rm(temp, { recursive: true, force: true });
+  }
+});
+test("child profiles suppress inherited skill metadata while keeping their tools and complete", () => {
+  const hooks = new Map();
+  let active;
+  registerProfileResources(
+    {
+      registerTool() {},
+      on(name, callback) {
+        hooks.set(name, callback);
+      },
+      getAllTools: () => [],
+      setActiveTools: (tools) => {
+        active = tools;
+      },
+    },
+    () => ({ name: "executor", scope: "executor", tools: ["read"] }),
+    true,
+  );
+  const options = {
+    skills: [{ name: "UNRELATED_SKILL_METADATA" }],
+    selectedTools: [],
+  };
+  hooks.get("before_agent_start")({ systemPromptOptions: options });
+  assert.deepEqual(options.skills, []);
+  assert.deepEqual(active, ["read", "complete"]);
+});
 test("MCP gateway filters schemas, blocks cross-service calls and preserves image blocks", async () => {
   const tools = new Map(),
     hooks = new Map();
@@ -183,7 +275,7 @@ test("MCP gateway filters schemas, blocks cross-service calls and preserves imag
   );
 });
 test(
-  "real SDK sends only selected catalogs and declarations across nine profile changes",
+  "real SDK sends no automatic skill metadata across nine profiles and loads only requested permitted skills",
   { timeout: 120000 },
   async () => {
     const root = path.resolve(import.meta.dirname, ".."),
@@ -243,7 +335,7 @@ export default function(pi){
  for(const name of ["zg","subagent","todo","ask_user_question","goal_complete","goal_blocked","goal_wait","plannotator_submit_plan","web_search","fetch_content","get_search_content","source_check"]){pi.registerTool({name,label:name,description:name,parameters:Type.Object({}),async execute(){return {content:[{type:"text",text:"fixture"}],details:{}}}});}
  pi.on("before_agent_start",e=>{e.systemPromptOptions.sections.mcp_servers="UNRELATED_SERVICE_CATALOG";});
  pi.registerProvider("offline-profiles",{api:"offline-profiles-api",baseUrl:"http://127.0.0.1:1/unused",apiKey:"offline-test",models:["gpt-6-astra","gpt-6.1-sol","gpt-6-luna"].map(id=>({id,name:id,reasoning:true,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:64000,maxTokens:4096})),streamSimple(model,context){
- appendFileSync(${JSON.stringify(records)},JSON.stringify({model:model.id,context})+"\\n");const s=createAssistantMessageEventStream();queueMicrotask(()=>{const m={role:"assistant",api:"offline-profiles-api",provider:"offline-profiles",model:model.id,content:[{type:"text",text:"OFFLINE"}],stopReason:"stop",timestamp:Date.now(),usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};s.push({type:"start",partial:m});s.push({type:"done",reason:"stop",message:m});s.end()});return s;}});
+ appendFileSync(${JSON.stringify(records)},JSON.stringify({model:model.id,context})+"\\n");const s=createAssistantMessageEventStream();queueMicrotask(()=>{const last=context.messages.at(-1);const text=last?.role==="user"?JSON.stringify(last.content):"";const request=text.includes("QUERY_SUPERBUILD")?{name:"skill_catalog",arguments:{query:"superbuild",limit:1}}:text.includes("LOAD_SUPERBUILD")?{name:"skill_load",arguments:{name:"superbuild"}}:text.includes("DENY_HIGGSFIELD")?{name:"skill_load",arguments:{name:"higgsfield"}}:undefined;const content=request?[{type:"toolCall",id:"resource-"+Date.now(),...request}]:[{type:"text",text:"OFFLINE"}];const m={role:"assistant",api:"offline-profiles-api",provider:"offline-profiles",model:model.id,content,stopReason:request?"toolUse":"stop",timestamp:Date.now(),usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};s.push({type:"start",partial:m});s.push({type:"done",reason:m.stopReason,message:m});s.end()});return s;}});
 }`,
       );
       const {
@@ -309,15 +401,15 @@ export default function(pi){
         true,
       );
       const expected = {
-        planner: ["pi-zgrep-search"],
-        orchestrator: ["pi-zgrep-search"],
-        executor: ["pi-zgrep-search"],
-        reviewer: ["pi-zgrep-search"],
-        "workspace-scout": ["pi-zgrep-search"],
-        "browser-operator": ["agent-browser"],
+        planner: [],
+        orchestrator: [],
+        executor: [],
+        reviewer: [],
+        "workspace-scout": [],
+        "browser-operator": [],
         "desktop-operator": [],
-        "higgsfield-specialist": ["higgsfield"],
-        "blender-specialist": ["blender-director", "blender-image-to-3d"],
+        "higgsfield-specialist": [],
+        "blender-specialist": [],
       };
       for (const [name, allowed] of Object.entries(expected)) {
         await session.prompt("/agent " + name);
@@ -367,6 +459,47 @@ export default function(pi){
               : "gpt-6-luna",
         );
       }
+      const latest = async () =>
+        JSON.parse(
+          (await fs.readFile(records, "utf8")).trim().split("\n").at(-1),
+        );
+      await session.prompt("/agent planner");
+      await session.prompt("QUERY_SUPERBUILD");
+      assert.match(
+        JSON.stringify((await latest()).context),
+        /CATALOG_superbuild/,
+      );
+      assert.doesNotMatch(
+        JSON.stringify((await latest()).context),
+        /BODY_superbuild|CATALOG_higgsfield/,
+      );
+      await session.prompt("LOAD_SUPERBUILD");
+      assert.match(JSON.stringify((await latest()).context), /BODY_superbuild/);
+      await session.prompt("DENY_HIGGSFIELD");
+      assert.doesNotMatch(
+        JSON.stringify((await latest()).context),
+        /BODY_higgsfield/,
+      );
+      assert.ok(
+        session.messages.some(
+          (m) =>
+            m.role === "toolResult" &&
+            m.isError &&
+            JSON.stringify(m.content).includes("Skill is unavailable"),
+        ),
+      );
+      await session.prompt("/agent orchestrator");
+      await session.prompt("After skill use and profile switch");
+      assert.doesNotMatch(
+        JSON.stringify((await latest()).context),
+        /BODY_superbuild|CATALOG_superbuild/,
+      );
+      await session.prompt("/agent reset");
+      await session.prompt("Default also has no automatic skill catalog");
+      const defaultSystems = (await latest()).context.messages.filter(
+        (m) => m.role === "system",
+      );
+      assert.doesNotMatch(JSON.stringify(defaultSystems), /CATALOG_|<skills>/);
       assert.deepEqual(errors, []);
     } finally {
       if (session) {

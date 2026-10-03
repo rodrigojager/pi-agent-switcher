@@ -595,6 +595,48 @@ test("structured prompt preserves other sections and filters skills by profile w
   assert.equal(options.skills.length, 2);
   assert.equal(options.sections.agent_profile, undefined);
 });
+test("on-demand mode hides catalogs even on reset and removes old system catalog patches", async () => {
+  const config = path.join(
+    process.env.PI_CODING_AGENT_DIR,
+    "agent-profiles.json",
+  );
+  await fs.mkdir(path.dirname(config), { recursive: true });
+  let original;
+  try {
+    original = await fs.readFile(config);
+  } catch {}
+  try {
+    await fs.writeFile(
+      config,
+      JSON.stringify({ skillDiscoveryMode: "on-demand" }),
+    );
+    const h = host(await fixture());
+    await h.command("agent", "planner");
+    let options = promptOptions();
+    await h.emit("before_agent_start", { systemPromptOptions: options });
+    assert.deepEqual(options.skills, []);
+    await h.command("agent", "reset");
+    options = promptOptions();
+    await h.emit("before_agent_start", { systemPromptOptions: options });
+    assert.deepEqual(options.skills, []);
+    const filtered = await h.emit("context_with_system", {
+      messages: [
+        {
+          role: "system",
+          content: "<skills>OLD_SKILL_CATALOG</skills>",
+          sections: { skills: "OLD_SKILL_CATALOG", guardian: "KEEP_GUARDIAN" },
+          timestamp: 0,
+        },
+        { role: "user", content: "KEEP_USER_TASK", timestamp: 1 },
+      ],
+    });
+    assert.doesNotMatch(JSON.stringify(filtered), /OLD_SKILL_CATALOG/);
+    assert.match(JSON.stringify(filtered), /KEEP_GUARDIAN|KEEP_USER_TASK/);
+  } finally {
+    if (original) await fs.writeFile(config, original);
+    else await fs.unlink(config);
+  }
+});
 test("missing named skill is omitted rather than leaking the full catalog", async () => {
   const cwd = await fixture();
   await writeAgent(

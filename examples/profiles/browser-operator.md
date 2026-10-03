@@ -7,7 +7,7 @@ thinking: low
 mode: both
 resource_profile: browser-operator
 tools: read, bash, skill_catalog, skill_load
-skills: agent-browser
+skills: false
 extensions: profile-provider, profile-browser-operator
 context: false
 ---

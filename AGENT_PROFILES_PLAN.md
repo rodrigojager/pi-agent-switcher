@@ -16,3 +16,11 @@ Validate parsers, profile discovery, actual request context with an offline SDK 
 - Installed global Pi discovery found all eleven profiles without diagnostics or missing declared tools; the account-pool catalog contains Astra, Sol and Luna.
 - Explicit child loading registered the account-pool provider and scoped resource tools without errors.
 - Existing definitions/settings were backed up outside the repository. The prior package directory remains available and no live Pi process was stopped or reloaded.
+
+## Fully on-demand follow-up
+
+Version 0.4.0-rodrigo.7 removes even the initial skill metadata catalog. All eleven
+provided definitions set skills to false; global on-demand mode also covers reset.
+The 38 checks include actual SDK requests with zero automatic catalogs,
+on-demand permitted loading and cross-profile denial. Shared libraries and other
+clients remain unchanged. Existing model/effort defaults are preserved on upgrade.

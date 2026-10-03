@@ -1,20 +1,20 @@
 # Dedicated agent profiles
 
-These profiles separate planning from coordination and keep unrelated skill and
-role catalogs out of normal requests. Prompts and descriptions are in English;
+These profiles separate planning from coordination and keep automatic skill and
+unselected role catalogs out of normal requests. Prompts and descriptions are in English;
 agents answer in the user's language.
 
-| Profile | Default model / effort | Initially advertised skills | On-demand skills and tools |
-| --- | --- | --- | --- |
-| planner | GPT-6 Astra / high | pi-zgrep-search | superbuild, trusted project skills; plan submission and questions when installed |
-| orchestrator | GPT-6.1 Sol / medium | pi-zgrep-search | bounded agent discovery, subagents, task/goal tools; direct workspace search |
-| executor | GPT-6 Luna / high | pi-zgrep-search | trusted project skills, editing and targeted validation |
-| reviewer | GPT-6 Luna / high | pi-zgrep-search | trusted project skills; read-only review instructions |
-| workspace-scout | GPT-6 Luna / low | pi-zgrep-search | direct local search; explicit user invocation only |
-| browser-operator | GPT-6 Luna / low | agent-browser | existing browser attachment; optional web-access tools |
-| desktop-operator | GPT-6 Luna / low | none | Windows-MCP schemas and calls through profile_mcp |
-| higgsfield-specialist | GPT-6.1 Sol / high | higgsfield | Higgsfield family and Higgsfield MCP only |
-| blender-specialist | GPT-6.1 Sol / medium | blender-director, blender-image-to-3d | Blender family; Blender MCP if configured or verified Blender CLI |
+| Profile | Default model / effort | Permitted skills and resources |
+| --- | --- | --- |
+| planner | GPT-6 Astra / high | pi-zgrep-search, superbuild, trusted project skills; planning tools |
+| orchestrator | GPT-6.1 Sol / medium | pi-zgrep-search; bounded agent discovery, subagents, task/goal tools |
+| executor | GPT-6 Luna / high | pi-zgrep-search, trusted project skills; editing and targeted validation |
+| reviewer | GPT-6 Luna / high | pi-zgrep-search, trusted project skills; read-only review instructions |
+| workspace-scout | GPT-6 Luna / low | pi-zgrep-search; direct search on explicit user invocation only |
+| browser-operator | GPT-6 Luna / low | agent-browser; existing browser attachment and optional web tools |
+| desktop-operator | GPT-6 Luna / low | no skills; scoped Windows-MCP |
+| higgsfield-specialist | GPT-6.1 Sol / high | Higgsfield family and scoped Higgsfield MCP |
+| blender-specialist | GPT-6.1 Sol / medium | Blender family; configured Blender MCP or verified Blender CLI |
 
 The two existing Open Video Animator profiles retain Luna/high and their file,
 worktree, desktop and validation ownership contracts. They use the executor or
@@ -38,6 +38,10 @@ The installer writes agents and child wrappers to the global Pi agent directory,
 saves backups outside this repository, and creates `agent-profiles.json` with
 `orchestrator` as the default for a new, unsaved main session. Saved selections are
 restored. Existing jobs are not stopped or modified. Reload Pi when idle.
+
+For an existing installation, use `node scripts/install-profiles.mjs --update-on-demand`.
+This preserves existing agent prompts, selected default models/effort and the new-session
+default while disabling automatic skill metadata and updating the child wrappers.
 
 Explicit child extensions restore the account-pool provider without exposing its
 account-management tools. The common provider wrapper assumes the pool's existing
@@ -66,12 +70,26 @@ and skills are not included in ordinary orchestration requests.
 
 ## Context behavior
 
-`skills:` lists only the small initial discovery catalog. Pi includes their names,
-descriptions and paths, not full bodies. `skill_catalog` returns up to five permitted
-matches by default; `skill_load` reads one permitted skill. Higgsfield and Blender
+All supplied agents use `skills: false`: neither names, descriptions, paths nor
+bodies are automatically advertised. The main switcher also honors
+`skillDiscoveryMode: "on-demand"` in `agent-profiles.json`, including `Pi default`
+and `/agent reset`. Old system skill catalog patches are removed from outgoing requests.
+
+The generic `skill_catalog` and `skill_load` tool schemas remain available on capable
+profiles. Their schema overhead is independent of the number of installed skills.
+`skill_catalog` returns up to five permitted matches only when called; `skill_load`
+reads one permitted skill only when called. No extra agent or model inference is
+used by these local tools. Higgsfield and Blender
 families remain in the global shared skills folder, without being advertised to
 other profiles. Project skills are limited to the trusted current project's skill
 folders. `under-review` and `_migration` directories are excluded.
+
+Libraries remain in their shared folders and can still serve other clients. Loading
+metadata locally into the Pi process does not advertise it to the model. This policy
+does not change Codex's skill discovery. Explicitly loaded skill instructions remain
+part of task history while relevant to the active profile; they are not automatically
+discarded after each tool call. Discovery results from another profile are omitted
+when switching, alongside unrelated skill bodies.
 
 `agent_catalog` similarly returns bounded delegate metadata; neither agent bodies
 nor their roles/skills are inserted until delegation. No template specifies a

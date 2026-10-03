@@ -3,6 +3,7 @@ import path from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 const root = path.resolve(import.meta.dirname, ".."),
   agentDir = getAgentDir();
+const update = process.argv.includes("--update-on-demand");
 const backup = path.join(
   agentDir,
   "backups",
@@ -24,10 +25,20 @@ async function save(relative, content) {
 for (const file of await fs.readdir(path.join(root, "examples/profiles"))) {
   if (!file.endsWith(".md")) continue;
   const name = file.slice(0, -3);
-  await save(
-    "agents/" + file,
-    await fs.readFile(path.join(root, "examples/profiles", file)),
+  let content = await fs.readFile(
+    path.join(root, "examples/profiles", file),
+    "utf8",
   );
+  if (update) {
+    try {
+      content = (
+        await fs.readFile(path.join(agentDir, "agents", file), "utf8")
+      ).replace(/^skills:.*$/m, "skills: false");
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  await save("agents/" + file, content);
   await save(
     "extensions/profile-" + name + ".ts",
     "import {createChildProfile} from " +
@@ -39,10 +50,23 @@ for (const file of await fs.readdir(path.join(root, "examples/profiles"))) {
       ");\n",
   );
 }
-await save(
-  "agent-profiles.json",
-  await fs.readFile(path.join(root, "examples/agent-profiles.json")),
+let config = JSON.parse(
+  await fs.readFile(path.join(root, "examples/agent-profiles.json"), "utf8"),
 );
+if (update) {
+  try {
+    config = {
+      ...config,
+      ...JSON.parse(
+        await fs.readFile(path.join(agentDir, "agent-profiles.json"), "utf8"),
+      ),
+      skillDiscoveryMode: "on-demand",
+    };
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+await save("agent-profiles.json", JSON.stringify(config) + "\n");
 await save(
   "extensions/profile-provider.ts",
   await fs.readFile(path.join(root, "examples/extensions/profile-provider.ts")),

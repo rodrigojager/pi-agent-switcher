@@ -7,7 +7,7 @@ thinking: medium
 mode: both
 resource_profile: blender-specialist
 tools: read, bash, write, edit, profile_mcp, skill_catalog, skill_load
-skills: blender-director, blender-image-to-3d
+skills: false
 extensions: profile-provider, profile-blender-specialist
 context: false
 ---
