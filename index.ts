@@ -1,364 +1,349 @@
-/**
- * pi-agent-switcher Extension
- *
- * Allows users to manually switch between agent roles in the main Pi session.
- * Each agent is defined via markdown files with YAML frontmatter, controlling
- * system prompt, tools, model, and thinking level.
- *
- * Switch via Alt+A or /agent command.
- * List agents via /agents command.
- * Reset to default via /agent reset.
- */
-
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { Container, Key, type SelectItem, SelectList, Text, Box } from "@earendil-works/pi-tui";
-import { AgentStateManager } from "./agent-state";
-import { discoverAgents, resolveAgent } from "./agents";
-
-let stateManager: AgentStateManager;
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { stat } from "node:fs/promises";
+import path from "node:path";
+import {
+  discoverAgents,
+  discoverDelegates,
+  type AgentConfig,
+} from "./agents.js";
+import {
+  AgentStateManager,
+  type PersistedState,
+  type Baseline,
+} from "./agent-state.js";
+import { pickAgent } from "./picker.js";
+import { delegate, parseMention, agentAutocomplete } from "./delegation.js";
 
 export default function agentSwitcherExtension(pi: ExtensionAPI) {
-  stateManager = new AgentStateManager();
+  const state = new AgentStateManager();
+  let cwd = process.cwd();
+  let selecting = false;
+  let changing = false;
+  const status = (ctx: ExtensionContext) =>
+    ctx.ui.setStatus(
+      "agent-switcher",
+      state.agent ? `Agent: ${state.agent.name}` : undefined,
+    );
+  const report = (ctx: ExtensionContext, error: unknown) =>
+    ctx.ui.notify(
+      error instanceof Error ? error.message : String(error),
+      "error",
+    );
+  const primary = async (ctx: ExtensionContext) =>
+    (await discoverAgents(ctx.cwd)).agents.filter((a) => a.mode !== "subagent");
 
-  // ============================================================
-  // Event: before_agent_start — modify system prompt & tools
-  // ============================================================
-  pi.on("before_agent_start", async (event, ctx) => {
-    const currentAgentName = stateManager.getCurrentAgent();
-    if (!currentAgentName) return;
-
-    const agent = resolveAgent(ctx.cwd, currentAgentName, stateManager.lastDiscovery());
-    if (!agent) return;
-
-    // Always use prepend mode: agent's identity goes first (high-attention position),
-    // Pi's built-in tool/guideline text is kept after as background context,
-    // wrapped in a tag so the model clearly separates identity from environment.
-    const systemPrompt =
-      agent.systemPrompt +
-      "\n\n<environment_context>\n" +
-      event.systemPrompt +
-      "\n</environment_context>";
-
-    // Tool set switching
-    if (agent.tools && agent.tools.length > 0) {
-      pi.setActiveTools(agent.tools);
-    }
-
-    // Model switching
-    if (agent.model) {
-      const [provider, ...rest] = agent.model.split("/");
-      const modelId = rest.join("/");
-      if (provider && modelId) {
-        const model = ctx.modelRegistry.find(provider, modelId);
-        if (model) {
-          const success = await pi.setModel(model);
-          if (!success) {
-            ctx.ui.notify(
-              `Agent "${agent.name}": 无法切换到模型 ${agent.model}`,
-              "warning",
-            );
-          }
-        }
+  function modelFor(
+    agent: AgentConfig | undefined,
+    baseline: Baseline,
+    ctx: ExtensionContext,
+  ) {
+    if (!agent?.model)
+      return baseline.model
+        ? ctx.modelRegistry.find(baseline.model.provider, baseline.model.id)
+        : undefined;
+    const slash = agent.model.indexOf("/");
+    const provider =
+      agent.provider ?? (slash > 0 ? agent.model.slice(0, slash) : undefined);
+    const id = slash > 0 ? agent.model.slice(slash + 1) : agent.model;
+    const model = provider
+      ? ctx.modelRegistry.find(provider, id)
+      : ctx.modelRegistry.find(
+          baseline.model?.provider ?? ctx.model?.provider ?? "",
+          id,
+        );
+    if (model) return model;
+    const matches = provider
+      ? []
+      : ctx.modelRegistry.getAvailable().filter((m) => m.id === id);
+    if (matches.length === 1) return matches[0];
+    throw new Error(
+      `Model unavailable or ambiguous for ${agent.name}: ${agent.model}`,
+    );
+  }
+  async function change(
+    name: string | null,
+    ctx: ExtensionContext,
+    persist = true,
+  ) {
+    if (!ctx.isIdle() || changing)
+      throw new Error(
+        "Wait for the current turn to finish before switching the main agent.",
+      );
+    changing = true;
+    try {
+      const agent = name
+        ? (await primary(ctx)).find((a) => a.name === name)
+        : undefined;
+      if (name && !agent)
+        throw new Error(
+          `Unknown main agent: ${name}. Open /agent to see available profiles.`,
+        );
+      if (agent?.source === "project" && !ctx.isProjectTrusted())
+        throw new Error(
+          "Trust this project in Pi before activating its agent profile.",
+        );
+      if (!agent && !state.baseline) {
+        state.agent = null;
+        status(ctx);
+        return;
       }
+      const baseline = state.baseline ?? state.capture(pi, ctx);
+      const tools = agent?.tools ?? baseline.tools;
+      const configured = new Set(
+        pi
+          .getAllTools()
+          .filter((t) => t.exposure !== "hidden")
+          .map((t) => t.name),
+      );
+      const missing = tools.filter((tool) => !configured.has(tool));
+      if (missing.length)
+        throw new Error(`Unavailable tools: ${missing.join(", ")}`);
+      const model = modelFor(agent, baseline, ctx);
+      if (baseline.model && !agent?.model && !model)
+        throw new Error(
+          `Original model is no longer available: ${baseline.model.provider}/${baseline.model.id}`,
+        );
+      const modelChanged =
+        model &&
+        (model.provider !== ctx.model?.provider || model.id !== ctx.model?.id);
+      if (modelChanged && !(await pi.setModel(model)))
+        throw new Error(
+          `Authentication unavailable for ${model.provider}/${model.id}`,
+        );
+      pi.setActiveTools(tools);
+      pi.setThinkingLevel(agent?.thinking ?? baseline.thinking);
+      state.baseline = agent ? baseline : undefined;
+      state.agent = agent ?? null;
+      if (persist) state.persist(pi);
+      status(ctx);
+      if (persist)
+        ctx.ui.notify(
+          agent ? `Main agent: ${agent.name}` : "Pi default restored",
+          "info",
+        );
+    } finally {
+      changing = false;
     }
-
-    // Thinking level switching
-    if (agent.thinking) {
-      pi.setThinkingLevel(agent.thinking);
+  }
+  async function open(ctx: ExtensionContext, delegation = false) {
+    if (selecting) return;
+    if (!delegation && !ctx.isIdle()) {
+      ctx.ui.notify(
+        "Wait for the current turn to finish before switching the main agent.",
+        "info",
+      );
+      return;
     }
-
-    return {
-      systemPrompt,
-    };
-  });
-
-  // ============================================================
-  // Event: session_start — restore agent state & update UI
-  // ============================================================
-  pi.on("session_start", async (_event, ctx) => {
-    // Restore agent state — find the LATEST entry (not the first)
-    let latestState: { currentAgent?: string | null } | undefined;
-    for (const entry of ctx.sessionManager.getBranch()) {
+    selecting = true;
+    try {
+      const agents = delegation
+        ? (await discoverDelegates(ctx.cwd)).agents
+        : await primary(ctx);
+      if (delegation && !agents.length) {
+        ctx.ui.notify(
+          "No subagent definitions found in .pi/agents or ~/.pi/agent/agents.",
+          "warning",
+        );
+        return;
+      }
+      const choice = await pickAgent(
+        ctx,
+        agents,
+        state.agent?.name,
+        delegation,
+      );
+      if (!choice) return;
+      if (!delegation)
+        await change(choice === "__reset__" ? null : choice, ctx);
+      else {
+        const task = await ctx.ui.input(
+          `Task for ${choice}`,
+          "Describe the task and include the context the specialist needs",
+        );
+        if (task?.trim()) await dispatch(ctx, choice, task.trim());
+      }
+    } catch (error) {
+      report(ctx, error);
+    } finally {
+      selecting = false;
+    }
+  }
+  async function dispatch(ctx: ExtensionContext, agent: string, task: string) {
+    const result = await delegate(pi, ctx, agent, task);
+    if (!result.ok) throw new Error(result.message);
+    ctx.ui.notify(result.message, "info");
+  }
+  async function restore(ctx: ExtensionContext) {
+    cwd = ctx.cwd;
+    const previousBaseline = state.baseline;
+    state.agent = null;
+    let saved: PersistedState | undefined;
+    for (const entry of ctx.sessionManager.getBranch())
       if (
         entry.type === "custom" &&
-        (entry as { customType?: string }).customType === "agent-switcher-state"
-      ) {
-        const data = (entry as { data?: { currentAgent?: string | null } }).data;
-        if (data) latestState = data;
+        entry.customType === "agent-switcher-state"
+      )
+        saved = entry.data as PersistedState | undefined;
+    state.baseline = saved?.baseline ?? previousBaseline;
+    try {
+      if (saved?.currentAgent) await change(saved.currentAgent, ctx, false);
+      else if (state.baseline) await change(null, ctx, false);
+    } catch (error) {
+      report(ctx, error);
+    }
+    status(ctx);
+  }
+  pi.on("session_start", async (_event, ctx) => {
+    await restore(ctx);
+    if (ctx.mode === "tui")
+      ctx.ui.addAutocompleteProvider((base) =>
+        agentAutocomplete(
+          base,
+          async () => (await discoverDelegates(cwd)).agents,
+        ),
+      );
+  });
+  pi.on("session_tree", async (_event, ctx) => restore(ctx));
+  pi.on("resources_discover", (_event, ctx) => {
+    cwd = ctx.cwd;
+  });
+  pi.on("before_agent_start", (event, ctx) => {
+    const agent = state.agent;
+    if (!agent) return;
+    const options = event.systemPromptOptions;
+    if (agent.skills !== undefined) {
+      const allow = agent.skills === false ? [] : agent.skills;
+      const unknown = allow.filter(
+        (name) => !options.skills.some((skill) => skill.name === name),
+      );
+      options.skills = options.skills.filter((skill) =>
+        allow.includes(skill.name),
+      );
+      if (unknown.length)
+        ctx.ui.notify(
+          `Skills are not loaded in this Pi session and were omitted: ${unknown.join(", ")}`,
+          "warning",
+        );
+    }
+    if (agent.context === false) options.contextFiles = [];
+    options.sections.agent_profile = `Active main agent: ${agent.name}\n\n${agent.systemPrompt}`;
+  });
+  pi.on("input", async (event, ctx) => {
+    if (event.source !== "interactive") return { action: "continue" };
+    const mention = parseMention(
+      event.text,
+      (await discoverDelegates(ctx.cwd)).agents,
+    );
+    if (!mention) return { action: "continue" };
+    if (!mention.explicit && mention.agent) {
+      try {
+        await stat(path.resolve(ctx.cwd, mention.agent));
+        return { action: "continue" };
+      } catch {
+        /* No file with this name: address the agent. */
       }
     }
-    if (latestState?.currentAgent) {
-      stateManager.setAgent(latestState.currentAgent);
-      // Restore session name display
-      pi.setSessionName(`🤖 ${latestState.currentAgent}`);
-    } else {
-      stateManager.reset();
+    try {
+      if (!mention.agent)
+        throw new Error(
+          "Unknown delegation target. Use /delegate to select an agent.",
+        );
+      if (event.images?.length)
+        throw new Error(
+          "Attachments cannot be forwarded by this subagent runtime. Include file paths and a text task instead.",
+        );
+      if (!mention.task)
+        throw new Error(
+          `Add a task after @${mention.agent}, or use /delegate.`,
+        );
+      await dispatch(ctx, mention.agent, mention.task);
+    } catch (error) {
+      report(ctx, error);
+      ctx.ui.setEditorText(event.text);
     }
-
-    // Discover available agents
-    const discovery = discoverAgents(ctx.cwd, "both");
-    stateManager.setLastDiscovery(discovery);
+    return { action: "handled" };
   });
-
-  // ============================================================
-  // Shortcut: Alt+A — open agent switcher
-  // ============================================================
-  pi.registerShortcut(Key.alt("a"), {
-    description: "切换主 agent 角色",
-    handler: async (ctx) => {
-      if (!ctx.isIdle()) return;
-      await openAgentSwitcher(pi, stateManager, ctx);
-    },
+  pi.registerShortcut("alt+a", {
+    description: "Search and switch main agent",
+    handler: async (ctx) => open(ctx),
   });
-
-  // ============================================================
-  // Command: /agent <name> — switch or open selector
-  // ============================================================
+  const completions = async (prefix: string) =>
+    (await discoverAgents(cwd)).agents
+      .filter(
+        (a) =>
+          a.mode !== "subagent" &&
+          a.name.toLowerCase().includes(prefix.toLowerCase()),
+      )
+      .map((a) => ({
+        value: a.name,
+        label: a.name,
+        description: a.description,
+      }));
   pi.registerCommand("agent", {
-    description: "切换主 agent 角色",
-    getArgumentCompletions(prefix: string) {
-      const discovery = discoverAgents(process.cwd(), "both");
-      return discovery.agents
-        .filter((a) => a.name.startsWith(prefix))
-        .map((a) => ({ value: a.name, label: a.name, description: a.description }));
-    },
+    description: "Search/switch main agent: /agent [name|reset]",
+    getArgumentCompletions: completions,
     handler: async (args, ctx) => {
-      const agentName = args.trim();
-      if (!agentName) {
-        await openAgentSwitcher(pi, stateManager, ctx);
-        return;
+      cwd = ctx.cwd;
+      if (!args.trim()) return open(ctx);
+      try {
+        await change(
+          ["reset", "default", "off"].includes(args.trim())
+            ? null
+            : args.trim(),
+          ctx,
+        );
+      } catch (error) {
+        report(ctx, error);
       }
-      if (agentName === "reset" || agentName === "default") {
-        await resetToDefault(pi, stateManager, ctx);
-        return;
-      }
-      await performSwitch(pi, stateManager, agentName, ctx);
     },
   });
-
-  // ============================================================
-  // Command: /agents — list all available agents
-  // ============================================================
   pi.registerCommand("agents", {
-    description: "列出所有可用 agent 角色",
+    description: "List main-agent profiles and descriptions",
     handler: async (_args, ctx) => {
-      const discovery = discoverAgents(ctx.cwd, "both");
-      const currentAgent = stateManager.getCurrentAgent();
-      const lines = discovery.agents.map((a) => {
-        const marker = a.name === currentAgent ? "→ " : "  ";
-        const scopeTag = a.source === "project" ? " [项目]" : "";
-        const modelTag = a.model ? ` (${a.model})` : "";
-        return `${marker}${a.name}: ${a.description}${modelTag}${scopeTag}`;
-      });
+      const result = await discoverAgents(ctx.cwd);
       ctx.ui.notify(
-        `当前: ${currentAgent || "默认"}\n\n${lines.join("\n")}`,
+        [
+          `Main agent: ${state.agent?.name ?? "Pi default"}`,
+          ...result.agents
+            .filter((a) => a.mode !== "subagent")
+            .map((a) => `${a.name} — ${a.description} (${a.source})`),
+          ...result.diagnostics,
+        ].join("\n"),
         "info",
       );
     },
   });
-
-}
-
-// ============================================================
-// Core: open agent selector UI
-// ============================================================
-async function openAgentSwitcher(
-  pi: ExtensionAPI,
-  stateManager: AgentStateManager,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const discovery = discoverAgents(ctx.cwd, "both");
-  stateManager.setLastDiscovery(discovery);
-  const currentAgent = stateManager.getCurrentAgent();
-
-  // Separate global and project agents
-  const globalAgents = discovery.agents.filter((a) => a.source !== "project");
-  const projectAgents = discovery.agents.filter((a) => a.source === "project");
-
-  const items: SelectItem[] = [];
-
-  // Global agents
-  for (const a of globalAgents) {
-    items.push({
-      value: a.name,
-      label: a.name === currentAgent ? `✓ ${a.name}` : `  ${a.name}`,
-      description: a.description + (a.model ? ` (${a.model})` : ""),
-    });
-  }
-
-  // Project agents (with separator)
-  if (projectAgents.length > 0) {
-    items.push({
-      value: "__separator__",
-      label: "── 项目 Agent ──",
-      description: "",
-    });
-    for (const a of projectAgents) {
-      items.push({
-        value: a.name,
-        label:
-          a.name === currentAgent
-            ? `✓ ${a.name} [项目]`
-            : `  ${a.name} [项目]`,
-        description: a.description + (a.model ? ` (${a.model})` : ""),
-      });
-    }
-  }
-
-  // Reset option
-  items.push({
-    value: "__reset__",
-    label: "↩ 重置为默认",
-    description: "恢复 Pi 默认行为",
+  pi.registerCommand("delegate", {
+    description: "Select a specialist or delegate: /delegate <agent> <task>",
+    getArgumentCompletions: async (prefix) =>
+      (await discoverDelegates(cwd)).agents
+        .filter((a) => a.name.startsWith(prefix))
+        .map((a) => ({
+          value: a.name,
+          label: a.name,
+          description: a.description,
+        })),
+    handler: async (args, ctx) => {
+      if (!args.trim()) return open(ctx, true);
+      const match = args.trim().match(/^(\S+)\s+([\s\S]+)$/);
+      if (!match) {
+        ctx.ui.notify("Usage: /delegate <agent> <task>", "error");
+        return;
+      }
+      try {
+        if (
+          !(await discoverDelegates(ctx.cwd)).agents.some(
+            (a) => a.name === match[1],
+          )
+        )
+          throw new Error(`Unknown subagent: ${match[1]}`);
+        await dispatch(ctx, match[1]!, match[2]!.trim());
+      } catch (error) {
+        report(ctx, error);
+      }
+    },
   });
-
-  // Build digit-to-value mapping for quick shortcuts (keys 1-9),
-  // and prepend shortcut numbers to item labels.
-  const shortcutMap = new Map<number, string>();
-  {
-    let num = 1;
-    for (const item of items) {
-      if (item.value === "__separator__") continue;
-      if (num > 9) break;
-      shortcutMap.set(num, item.value);
-      const prefix = `[${num}] `;
-      item.label = prefix + item.label;
-      num++;
-    }
-  }
-
-  const result = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
-    const container = new Container();
-
-    // Box wrapper with subtle background to distinguish from background
-    const box = new Box(0, 0, (s: string) => theme.bg("customMessageBg", s));
-
-    // Top border
-    box.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-    // Title
-    box.addChild(
-      new Text(
-        theme.fg("accent", theme.bold("🤖 切换主 Agent")) +
-          " " +
-          theme.fg("dim", `(当前: ${currentAgent || "默认"})`),
-        1,
-        0,
-      ),
-    );
-
-    // SelectList
-    const selectList = new SelectList(items, Math.min(items.length, 12), {
-      selectedPrefix: (t) => theme.fg("accent", t),
-      selectedText: (t) => theme.fg("accent", t),
-      description: (t) => theme.fg("muted", t),
-      scrollInfo: (t) => theme.fg("dim", t),
-      noMatch: (t) => theme.fg("warning", t),
-    });
-    selectList.onSelect = (item) => done(item.value);
-    selectList.onCancel = () => done(null);
-    box.addChild(selectList);
-
-    // Help text
-    box.addChild(
-      new Text(
-        theme.fg("dim", "↑↓ 导航 • 1-9 快捷选择 • enter 选择 • esc 取消 • 输入过滤"),
-        1,
-        0,
-      ),
-    );
-
-    // Bottom border
-    box.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-    container.addChild(box);
-
-    return {
-      render: (w: number) => container.render(w),
-      invalidate: () => container.invalidate(),
-      handleInput: (data: string) => {
-        // Quick shortcut: digit 1-9 directly selects the corresponding item
-        if (data.length === 1 && data >= "1" && data <= "9") {
-          const digit = Number(data);
-          const value = shortcutMap.get(digit);
-          if (value) {
-            done(value);
-            return;
-          }
-        }
-        selectList.handleInput(data);
-        tui.requestRender();
-      },
-    };
-  });
-
-  if (result === null || result === "__separator__") return;
-  if (result === "__reset__") {
-    await resetToDefault(pi, stateManager, ctx);
-    return;
-  }
-  await performSwitch(pi, stateManager, result, ctx);
-}
-
-// ============================================================
-// Core: perform agent switch
-// ============================================================
-async function performSwitch(
-  pi: ExtensionAPI,
-  stateManager: AgentStateManager,
-  agentName: string,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const discovery =
-    stateManager.lastDiscovery() ?? discoverAgents(ctx.cwd, "both");
-  const agent = discovery.agents.find((a) => a.name === agentName);
-
-  if (!agent) {
-    const available = discovery.agents.map((a) => a.name).join(", ");
-    ctx.ui.notify(
-      `未知 agent: "${agentName}"。可用: ${available}`,
-      "error",
-    );
-    return;
-  }
-
-  const previousAgent = stateManager.getCurrentAgent();
-  stateManager.setAgent(agentName);
-
-  // Persist state in session
-  pi.appendEntry("agent-switcher-state", { currentAgent: agentName });
-
-  // Show agent name inline after cwd on line 1 of footer
-  pi.setSessionName(`🤖 ${agent.name}`);
-
-  // Notify user
-  const prevLabel = previousAgent || "默认";
-  ctx.ui.notify(`Agent 切换: ${prevLabel} → ${agent.name}`, "info");
-}
-
-// ============================================================
-// Core: reset to default agent
-// ============================================================
-async function resetToDefault(
-  pi: ExtensionAPI,
-  stateManager: AgentStateManager,
-  ctx: ExtensionContext,
-): Promise<void> {
-  const previousAgent = stateManager.getCurrentAgent();
-  if (!previousAgent) {
-    ctx.ui.notify("当前已是默认 agent", "info");
-    return;
-  }
-
-  stateManager.reset();
-
-  // Persist reset
-  pi.appendEntry("agent-switcher-state", { currentAgent: null });
-
-  // Restore original session name (or clear if it was set by us)
-  pi.setSessionName("");
-
-  // Notify user
-  ctx.ui.notify(`Agent 重置: ${previousAgent} → 默认`, "info");
 }

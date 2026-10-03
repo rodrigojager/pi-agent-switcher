@@ -1,29 +1,34 @@
-import type { AgentDiscoveryResult } from "./agents";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import type { AgentConfig } from "./agents.js";
 
-/**
- * Manages the current agent state in memory.
- */
+export interface Baseline {
+  tools: string[];
+  model?: { provider: string; id: string };
+  thinking: ReturnType<ExtensionAPI["getThinkingLevel"]>;
+}
+export interface PersistedState {
+  currentAgent: string | null;
+  baseline?: Baseline;
+}
 export class AgentStateManager {
-  private currentAgent: string | null = null;
-  private lastDiscoveryResult: AgentDiscoveryResult | null = null;
-
-  getCurrentAgent(): string | null {
-    return this.currentAgent;
+  agent: AgentConfig | null = null;
+  baseline: Baseline | undefined;
+  capture(pi: ExtensionAPI, ctx: ExtensionContext): Baseline {
+    return {
+      tools: pi.getActiveTools(),
+      model: ctx.model
+        ? { provider: ctx.model.provider, id: ctx.model.id }
+        : undefined,
+      thinking: pi.getThinkingLevel(),
+    };
   }
-
-  setAgent(name: string): void {
-    this.currentAgent = name;
-  }
-
-  reset(): void {
-    this.currentAgent = null;
-  }
-
-  setLastDiscovery(discovery: AgentDiscoveryResult): void {
-    this.lastDiscoveryResult = discovery;
-  }
-
-  lastDiscovery(): AgentDiscoveryResult | null {
-    return this.lastDiscoveryResult;
+  persist(pi: ExtensionAPI) {
+    pi.appendEntry("agent-switcher-state", {
+      currentAgent: this.agent?.name ?? null,
+      baseline: this.baseline,
+    } satisfies PersistedState);
   }
 }

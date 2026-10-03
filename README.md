@@ -1,148 +1,96 @@
-# pi-agent-switcher
+# Pi Agent Switcher — Rodrigo's version
 
-Pi 扩展：通过 Markdown 定义的 Agent 文件，在主会话中手动切换 Agent 角色。
+Switch the main Pi conversation to a specialist from a searchable popup. Delegate a separate task with `@agent task` while keeping the main conversation's profile.
 
-每个 Agent 拥有独立的系统提示词、工具集、模型和思考级别。Agent 定义为简单的 Markdown 文件 + YAML frontmatter。
+Derived from `pi-agent-switcher@0.2.1` by `byack`, maintained in [KunCheng-He/kk-ai](https://github.com/KunCheng-He/kk-ai/tree/main/pi-extensions/common/pi-agent-switcher). [Upstream provenance](UPSTREAM.md) and [all changes](CHANGES.md) are recorded separately.
 
-## 功能特性
+## Install
 
-- **Markdown 定义 Agent** — 用 `.md` 文件 + YAML frontmatter 定义 Agent 角色
-- **两级作用域** — 全局 Agent（`~/.pi/agent/k-priagent/`）和项目 Agent（`.pi/k-priagent/`）
-- **项目覆盖全局** — 同名项目 Agent 优先于全局 Agent
-- **与 subagent 分离** — 本扩展只管主会话角色（primary agent），读取 `k-priagent/`；`~/.pi/agent/agents/` 留给 [@agwab/pi-subagent](https://github.com/AgwaB/pi-subagent) 等子代理运行时独占，互不干扰
-- **系统提示词切换** — Agent 身份前置，Pi 内置上下文包裹在 `<environment_context>` 中
-- **工具集切换** — 按 Agent 限制可用工具
-- **模型切换** — 按 Agent 切换模型/提供商（如 `anthropic/claude-sonnet-4-20250514`）
-- **思考级别切换** — 按 Agent 设置思考级别（`off` / `low` / `medium` / `high`）
-- **会话持久化** — Agent 状态在会话分支间持久保存
-- **交互式选择器 UI** — 搜索、导航、数字快捷选择
+Requires Pi 1.0.0 or newer. For delegation, use [Rodrigo's Pi Subagent](https://github.com/rodrigojager/pi-subagent) `v0.12.4-rodrigo.2` or newer.
 
-## 安装
-
-```bash
-pi install npm:pi-agent-switcher
+```sh
+pi install https://github.com/rodrigojager/pi-agent-switcher@v0.3.0-rodrigo.1
 ```
 
-## 使用方式
+If Pi is already open, use `/reload` after active work finishes. The package does not reload Pi or stop existing jobs automatically. Enable one agent-switcher implementation at a time, since `/agent` and `Alt+A` are shared command/shortcut names.
 
-### 命令
+## Usage
 
-| 命令            | 说明                    |
-| --------------- | ----------------------- |
-| `/agent <name>` | 切换到指定 Agent        |
-| `/agent`        | 打开交互式 Agent 选择器 |
-| `/agent reset`  | 重置为 Pi 默认行为      |
-| `/agents`       | 列出所有可用 Agent      |
+| Action                               | Command or key                               |
+| ------------------------------------ | -------------------------------------------- |
+| Open the searchable main-agent popup | **Alt+A** or `/agent`                        |
+| Activate a main profile directly     | `/agent <name>`                              |
+| Restore the original Pi profile      | `/agent reset`                               |
+| List profiles and descriptions       | `/agents`                                    |
+| Select a specialist and enter a task | `/delegate`                                  |
+| Delegate directly                    | `/delegate <name> <task>`                    |
+| Delegate from the chat               | `@scout Find the files that implement login` |
 
-### 快捷键
+The popup displays **bold agent names** followed by descriptions. Type to filter by either field; multi-word searches and accents work. Use ↑/↓, Enter, and Esc. Numbers remain searchable characters. The active profile is marked, and `Pi default` restores the original session settings. `Ctrl+A` and `Ctrl+P` retain their Pi functions.
 
-| 按键    | 动作                    |
-| ------- | ----------------------- |
-| `Alt+A` | 打开交互式 Agent 选择器 |
+`@` completion adds specialist suggestions alongside Pi's file suggestions. Completing an agent inserts the explicit `@agent:<name>` form, avoiding file-name ambiguity. A bare `@<name>` works at the start of a message when a matching agent exists and there is no file with that name. `@README.md`, path references, and mentions elsewhere in a sentence keep normal Pi behavior.
 
-### 交互式选择器
+## Agent definitions
 
-选择器 UI 支持：
+Existing definitions work without copying them:
 
-- **↑↓ 方向键** — 列表导航
-- **1-9 数字键** — 快捷选择
-- **Enter** — 确认选择
-- **Esc** — 取消
-- **输入过滤** — 按名称/描述模糊搜索
+- Global shared agents: `~/.pi/agent/agents/*.md`
+- Project shared agents: nearest ancestor `.pi/agents/*.md`
+- Global main-only profiles: `~/.pi/agent/k-priagent/**/*.md`
+- Project main-only profiles: nearest ancestor `.pi/k-priagent/**/*.md`
 
-## 定义 Agent
+Project definitions override global definitions. Within a scope, an explicit `k-priagent` profile overrides a shared definition with the same name. Delegation uses the `agents` definitions consumed by the existing subagent runtime, independently of a main-only override.
 
-在以下目录创建 `.md` 文件：
-
-- **全局 Agent**：`~/.pi/agent/k-priagent/` — 所有项目可用
-- **项目 Agent**：`.pi/k-priagent/` — 仅当前项目可用
-
-### Agent 文件格式
-
-```markdown
+```yaml
 ---
-name: my-agent
-description: 简短描述此 Agent 的职责
-tools: read,write,bash,edit
-model: anthropic/claude-sonnet-4-20250514
-thinking: medium
----
-
-你是一个专注于 [特定任务] 的专业 Agent。
-
-你的职责：
-
-- ...
-- ...
-
-规范：
-
-- ...
-```
-
-### Frontmatter 字段
-
-| 字段          | 必需 | 说明                                                                       |
-| ------------- | ---- | -------------------------------------------------------------------------- |
-| `name`        | ✅   | Agent 唯一标识（用于 `/agent <name>`）                                     |
-| `description` | ✅   | 简短描述，显示在 Agent 列表中                                              |
-| `tools`       | ❌   | 逗号分隔的允许工具列表（如 `read,write,bash,edit`）                        |
-| `model`       | ❌   | 模型，格式为 `provider/modelId`（如 `anthropic/claude-sonnet-4-20250514`） |
-| `thinking`    | ❌   | 思考级别：`off`、`low`、`medium`、`high`                                   |
-
-Markdown 正文（frontmatter 之后的内容）即为 Agent 的系统提示词。
-
-### 示例 Agent
-
-**代码审查员**（`~/.pi/agent/k-priagent/code-reviewer.md`）：
-
-```markdown
----
-name: code-reviewer
-description: 专注于代码审查和质量
-tools: read,bash
+name: planner
+description: Plan implementation and delegate focused research
+provider: openai-codex
+model: YOUR_MODEL_ID
 thinking: high
+tools: read, bash, subagent
+skills: false
+mode: both
 ---
-
-你是一位资深代码审查员。关注以下方面：
-
-- 代码正确性与边界情况
-- 性能影响
-- 安全漏洞
-- 可读性与可维护性
-
-始终提供可操作的建议和具体代码示例。
+Produce an actionable plan. Delegate bounded research to the appropriate specialist.
 ```
 
-**前端开发**（`.pi/k-priagent/frontend.md`）：
+Only `name`, `description`, and a nonempty prompt body are required. Agent names must contain letters, numbers, `_`, `.`, or `-`; `reset`, `default`, and `off` are reserved. Fields:
 
-```markdown
----
-name: frontend
-description: 前端专家，精通 React/Vue
-model: anthropic/claude-sonnet-4-20250514
-tools: read,write,bash,edit
----
+| Field      | Behavior                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `model`    | `provider/model-id` or a bare ID. Bare IDs prefer the original session provider, then an unambiguous available model.       |
+| `provider` | Optional provider for a bare model ID.                                                                                      |
+| `thinking` | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. `thinkingLevel` is an alias. Pi can clamp unsupported levels. |
+| `tools`    | Comma-separated or YAML array of configured tool names. `[]` activates no tools.                                            |
+| `skills`   | Omitted: inherit Pi's loaded catalog. `false`/`[]`: advertise no skills. List: advertise only those loaded names.           |
+| `context`  | `false` omits context files such as `AGENTS.md` from the active profile's system prompt.                                    |
+| `mode`     | `primary`, `subagent`, or `both`. Shared agents default to `both`; `k-priagent` profiles default to `primary`.              |
 
-你是一位前端开发专家，精通 React、Vue 和现代 CSS。
-偏好组件化架构，遵循无障碍最佳实践。
+Omitted model, tools, or thinking inherit the session baseline captured before the first activation, preventing restrictions or model choices from a previous specialist leaking into another. Reset restores that baseline. The selected profile and baseline are persisted on the session branch; the user's session name is preserved. Re-select a profile after editing its definition to apply changes.
+
+## Skills and context
+
+Profiles modify Pi 1.0's structured system prompt and skill catalog without flattening other extensions' prompt sections. Unknown named skills are reported and omitted. Selection does not install skills or change their files.
+
+Skill filtering changes prompt visibility. It does not erase earlier conversation messages, revoke filesystem access, or prevent a user from explicitly invoking a skill. Existing context already read into the conversation remains there. Switching a main profile keeps the conversation history; delegation receives a separate task and its specialist prompt.
+
+Extensions remain loaded in the main Pi process. An agent's `extensions` field belongs to the child runtime; the main picker uses `tools` to select from tools already configured in the session. The picker does not restart or unload extensions when changing profiles.
+
+## Delegation
+
+The event-bus bridge routes requests through the existing `startSubagentJob` lifecycle: project-agent confirmation, isolated child context, numbered progress cards, `/jobs`, and cancellation. The main model is not called merely to dispatch a manually addressed task. Completion returns through the existing result cards. Include all relevant context or file paths in the task.
+
+Image attachments are refused because this runtime's task interface accepts text. A failed request is restored in the editor for retry. Without the compatible bridge, the picker still switches main profiles and reports how to enable delegation; existing `/run` continues working.
+
+## Development and validation
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck
+npm test
 ```
 
-## 工作原理
+Tests cover discovery/precedence, real input filtering, bold names, terminal width/height, immediate switching and reset, skill catalog visibility, branch restoration, mentions, file completion, and an end-to-end SDK session with an actual child process. The end-to-end provider is offline: it produces deterministic responses and makes no network or paid model requests.
 
-当 Agent 激活时，扩展通过 `before_agent_start` 事件修改 Pi 的行为：
-
-1. **系统提示词**：Agent 的系统提示词前置（高注意力位置），Pi 内置上下文包裹在 `<environment_context>` 标签中
-2. **工具**：若 Agent 定义了 `tools` 列表，则仅启用这些工具
-3. **模型**：若 Agent 定义了 `model`，Pi 切换到该模型
-4. **思考级别**：若 Agent 定义了 `thinking`，Pi 使用该思考配置
-
-会话启动时，扩展从会话历史中恢复上次激活的 Agent。
-
-## 调试
-
-如果想查看 Agent 切换后最终拼装出的完整系统提示词（Agent 身份 + `<environment_context>`），可以使用 [pi-message-capture](https://github.com/KunCheng-He/pi-message-capture)，它能捕获并展示每次发送给模型的完整消息内容。
-
-## 许可证
-
-MIT
+License: MIT.
