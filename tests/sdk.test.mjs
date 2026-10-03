@@ -64,6 +64,7 @@ export default function(pi) {
       const child = Number(process.env.PI_SUBAGENT_DEPTH ?? '0') > 0;
       appendFileSync(process.env.SWITCHER_TEST_MARKER, JSON.stringify({ pid: process.pid, child, model: model.id, context }) + '\\n');
       const stream = createAssistantMessageEventStream();
+      if (child && JSON.stringify(context.messages).includes('roles-cancel')) { setInterval(() => {}, 1000); return stream; }
       queueMicrotask(() => {
         const message = { role: 'assistant', api: 'offline-switcher-api', provider: 'offline-switcher', model: model.id,
           content: child ? [{ type: 'toolCall', id: 'offline-complete', name: 'complete', arguments: { outcome: 'Verified offline delegation' } }] : [{ type: 'text', text: 'OFFLINE OK' }],
@@ -341,6 +342,83 @@ export default function(pi) {
         mainCalls,
         "Delegation never called the main model",
       );
+      await session.prompt("@executor --role code-reviewer roles-cancel", {
+        source: "interactive",
+      });
+      let cancelCall;
+      const cancelStartDeadline = Date.now() + 15000;
+      while (Date.now() < cancelStartDeadline && !cancelCall) {
+        cancelCall = (await records()).find(
+          (c) =>
+            c.child &&
+            JSON.stringify(c.context.messages).includes("roles-cancel"),
+        );
+        if (!cancelCall)
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.ok(
+        cancelCall,
+        "Cancellation fixture reached an actual child model request",
+      );
+      await fs.writeFile(
+        path.join(agentDir, "roles/code-reviewer.md"),
+        "CHANGED_REVIEWER_ROLE",
+      );
+      const cancelPrompt = JSON.stringify(
+        cancelCall.context.messages.filter((m) => m.role === "system"),
+      );
+      assert.match(cancelPrompt, /REVIEWER_ROLE/);
+      assert.doesNotMatch(cancelPrompt, /CHANGED_REVIEWER_ROLE/);
+      const cancelledRun = session.messages.find(
+        (m) =>
+          m.role === "custom" &&
+          m.customType === "subagent-progress" &&
+          m.details?.role?.effectiveId === "code-reviewer" &&
+          m.details?.requestId &&
+          m.details.role.contentHash ===
+            resultMessages.find(
+              (r) => r.details?.results?.[0]?.task === "roles-reviewer",
+            ).details.results[0].role.contentHash,
+      );
+      assert.ok(cancelledRun, "Live metadata keeps the captured role hash");
+      const cancellationNotices = [];
+      session.extensionRunner.setUIContext(
+        {
+          ...session.extensionRunner.getUIContext(),
+          notify: (text) => cancellationNotices.push(text),
+        },
+        "print",
+      );
+      await session.prompt("/cancel-subagent all");
+      const alive = (pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      const cancelDeadline = Date.now() + 5000;
+      while (Date.now() < cancelDeadline && alive(cancelCall.pid))
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(
+        alive(cancelCall.pid),
+        false,
+        "Cancellation stopped the real child process",
+      );
+      while (
+        Date.now() < cancelDeadline &&
+        cancellationNotices.at(-1) !== "No active /run jobs."
+      ) {
+        await session.prompt("/cancel-subagent all");
+        if (cancellationNotices.at(-1) !== "No active /run jobs.")
+          await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.equal(
+        cancellationNotices.at(-1),
+        "No active /run jobs.",
+        "Cancellation lifecycle released the run registry before session disposal",
+      );
       assert.deepEqual(errors, []);
     } finally {
       if (session) {
@@ -355,7 +433,12 @@ export default function(pi) {
       if (oldNotifications === undefined)
         delete process.env.PI_SUBAGENT_DESKTOP_NOTIFICATIONS;
       else process.env.PI_SUBAGENT_DESKTOP_NOTIFICATIONS = oldNotifications;
-      await fs.rm(temp, { recursive: true, force: true });
+      await fs.rm(temp, {
+        recursive: true,
+        force: true,
+        maxRetries: 20,
+        retryDelay: 100,
+      });
     }
   },
 );
