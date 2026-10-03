@@ -71,6 +71,43 @@ test("role cards show full-width descriptions below names and hide IDs and User 
   assert.equal(value, role.id, "selection still returns the internal ID");
 });
 
+test("a blank line separates role cards without separating a name from its description", async () => {
+  const roles = [
+    role,
+    {
+      ...role,
+      id: "another-role",
+      name: "Another Specialist",
+      description: "Different responsibility.",
+    },
+  ];
+  await dialog(catalog(roles), (component) => {
+    const lines = component.render(140).map(plain);
+    const first = lines.findIndex((line) =>
+      line.includes("› Root Cause Debugger"),
+    );
+    assert.equal(lines[first + 1].trim(), description);
+    assert.equal(lines[first + 2], "");
+    assert.equal(lines[first + 3].trim(), "Another Specialist");
+    assert.equal(lines[first + 4].trim(), "Different responsibility.");
+  });
+  await dialog(
+    catalog(roles),
+    (component) => {
+      component.handleInput("\x1b[B");
+      const lines = component.render(80).map(plain);
+      const row = lines.findIndex((line) =>
+        line.includes("› Another Specialist"),
+      );
+      assert.ok(row >= 0);
+      assert.equal(lines[row + 1].trim(), "Different responsibility.");
+      assert.ok(lines.length <= Math.floor(18 * 0.8));
+    },
+    role.id,
+    18,
+  );
+});
+
 test("hidden role IDs and categories remain searchable with normal Input handling", async () => {
   for (const query of [
     "hidden-debugger-id",

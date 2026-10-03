@@ -1,5 +1,10 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.3
+
+- Separate role entries with a blank line in the picker and `/roles` output.
+- Account for spacing in the viewport budget so the selected role stays visible in small overlays.
+
 ## 0.4.0-rodrigo.2
 
 - Display roles as two-line entries, with the name above the description.

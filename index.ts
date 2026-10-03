@@ -522,7 +522,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
                 `${r.name}${r.source === "project" ? " · Project" : ""}\n  ${r.description}`,
             ),
           ...catalog.diagnostics,
-        ].join("\n") || "No roles installed.",
+        ].join("\n\n") || "No roles installed.",
         "info",
       );
       await status(ctx);

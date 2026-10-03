@@ -175,17 +175,23 @@ test("roles command shows names and descriptions without IDs or User labels, ret
     id,
     "---\nname: Readable Specialist\ndescription: Investigate failures with objective evidence.\ncategory: engineering\n---\nInvestigate.\n",
   );
+  await writeRole(
+    folder,
+    id + "-more",
+    "---\nname: Second Specialist\ndescription: A different responsibility.\n---\nInvestigate.\n",
+  );
   try {
     const h = host(await fixture());
     await h.command("roles", id);
     const text = h.notifications.at(-1).message;
     assert.equal(
       text,
-      "Readable Specialist\n  Investigate failures with objective evidence.",
+      "Readable Specialist\n  Investigate failures with objective evidence.\n\nSecond Specialist\n  A different responsibility.",
     );
     assert.doesNotMatch(text, /hidden-listing-id|\(user\)|engineering/);
   } finally {
     await fs.unlink(path.join(folder, id + ".md"));
+    await fs.unlink(path.join(folder, id + "-more.md"));
   }
 });
 

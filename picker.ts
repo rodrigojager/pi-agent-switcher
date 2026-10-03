@@ -117,9 +117,10 @@ export class AgentPicker {
             this.matches.every((item) => visibleWidth(item.name) + 15 < inner)
           ? 1
           : 3;
+    const entryGap = this.layout === "cards" ? 1 : 0;
     const maxVisible = Math.max(
       1,
-      Math.min(7, Math.floor(rowBudget / entryRows)),
+      Math.min(7, Math.floor((rowBudget + entryGap) / (entryRows + entryGap))),
     );
     const start = Math.max(
       0,
@@ -140,6 +141,7 @@ export class AgentPicker {
       const label = `${prefix}${name}${badge}`;
       const description = item.description.replace(/[\r\n]+/g, " ");
       if (this.layout === "cards") {
+        if (i > start) lines.push("");
         lines.push(
           line(i === this.selected ? this.theme.fg("accent", label) : label),
           line(
