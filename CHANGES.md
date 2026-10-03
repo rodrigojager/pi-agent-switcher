@@ -1,5 +1,12 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.3.0-rodrigo.2
+
+- Treat profile model and thinking as defaults: retain manual Pi model/thinking selections per profile on the session branch.
+- Restore these selections when switching profiles, resuming/reloading, or navigating the session tree, without changing definition files, other profiles, or delegated children.
+- Keep persisted entries immutable so subsequent selections cannot change an earlier branch's state.
+- Add regression coverage for manual selections, reset, fresh sessions, earlier branches, and real SDK model/thinking events.
+
 ## 0.3.0-rodrigo.1
 
 - Implemented actual live search by name and description, including accent-insensitive multi-word queries.

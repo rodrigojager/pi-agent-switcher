@@ -40,6 +40,15 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
     baseline: Baseline,
     ctx: ExtensionContext,
   ) {
+    const override = agent ? state.overrides[agent.name]?.model : undefined;
+    if (override) {
+      const model = ctx.modelRegistry.find(override.provider, override.id);
+      if (!model)
+        throw new Error(
+          `Selected model is no longer available: ${override.provider}/${override.id}`,
+        );
+      return model;
+    }
     if (!agent?.model)
       return baseline.model
         ? ctx.modelRegistry.find(baseline.model.provider, baseline.model.id)
@@ -114,7 +123,11 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
           `Authentication unavailable for ${model.provider}/${model.id}`,
         );
       pi.setActiveTools(tools);
-      pi.setThinkingLevel(agent?.thinking ?? baseline.thinking);
+      pi.setThinkingLevel(
+        (agent ? state.overrides[agent.name]?.thinking : undefined) ??
+          agent?.thinking ??
+          baseline.thinking,
+      );
       state.baseline = agent ? baseline : undefined;
       state.agent = agent ?? null;
       if (persist) state.persist(pi);
@@ -188,6 +201,7 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       )
         saved = entry.data as PersistedState | undefined;
     state.baseline = saved?.baseline ?? previousBaseline;
+    state.overrides = saved?.overrides ?? {};
     try {
       if (saved?.currentAgent) await change(saved.currentAgent, ctx, false);
       else if (state.baseline) await change(null, ctx, false);
@@ -207,6 +221,28 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       );
   });
   pi.on("session_tree", async (_event, ctx) => restore(ctx));
+  pi.on("model_select", (event) => {
+    if (!state.agent || changing || event.source === "restore") return;
+    state.overrides = {
+      ...state.overrides,
+      [state.agent.name]: {
+        ...state.overrides[state.agent.name],
+        model: { provider: event.model.provider, id: event.model.id },
+      },
+    };
+    state.persist(pi);
+  });
+  pi.on("thinking_level_select", (event) => {
+    if (!state.agent || changing) return;
+    state.overrides = {
+      ...state.overrides,
+      [state.agent.name]: {
+        ...state.overrides[state.agent.name],
+        thinking: event.level,
+      },
+    };
+    state.persist(pi);
+  });
   pi.on("resources_discover", (_event, ctx) => {
     cwd = ctx.cwd;
   });

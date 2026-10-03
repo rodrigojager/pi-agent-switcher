@@ -9,7 +9,7 @@ Derived from `pi-agent-switcher@0.2.1` by `byack`, maintained in [KunCheng-He/kk
 Requires Pi 1.0.0 or newer. For delegation, use [Rodrigo's Pi Subagent](https://github.com/rodrigojager/pi-subagent) `v0.12.4-rodrigo.2` or newer.
 
 ```sh
-pi install https://github.com/rodrigojager/pi-agent-switcher@v0.3.0-rodrigo.1
+pi install https://github.com/rodrigojager/pi-agent-switcher@v0.3.0-rodrigo.2
 ```
 
 If Pi is already open, use `/reload` after active work finishes. The package does not reload Pi or stop existing jobs automatically. Enable one agent-switcher implementation at a time, since `/agent` and `Alt+A` are shared command/shortcut names.
@@ -68,6 +68,10 @@ Only `name`, `description`, and a nonempty prompt body are required. Agent names
 | `mode`     | `primary`, `subagent`, or `both`. Shared agents default to `both`; `k-priagent` profiles default to `primary`.              |
 
 Omitted model, tools, or thinking inherit the session baseline captured before the first activation, preventing restrictions or model choices from a previous specialist leaking into another. Reset restores that baseline. The selected profile and baseline are persisted on the session branch; the user's session name is preserved. Re-select a profile after editing its definition to apply changes.
+
+An agent's `model` and `thinking` are defaults. After activation, use Pi's `/model` selector or `Ctrl+P` to change the model, and `Shift+Tab` to cycle thinking levels. Manual selections are remembered for that profile on the current session branch, including switching away and back, reload/resume, and tree navigation. They do not rewrite agent definitions or change other sessions. A new session starts with the definition's defaults. Supported thinking levels depend on the selected model; any model registered and authenticated in Pi can be selected, without editing this extension.
+
+Delegated children still use their agent definition's settings. Changing the main profile's model or thinking does not change a separately delegated child.
 
 ## Skills and context
 

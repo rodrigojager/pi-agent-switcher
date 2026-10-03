@@ -87,7 +87,7 @@ function host(cwd) {
       return true;
     },
     appendEntry(customType, data) {
-      branch.push({ type: "custom", customType, data: structuredClone(data) });
+      branch.push({ type: "custom", customType, data });
     },
     events: {
       emit(channel, data) {
@@ -164,6 +164,45 @@ function host(cwd) {
 }
 test.after(async () => {
   await fs.rm(temp, { recursive: true, force: true });
+});
+
+test("manual model and thinking selections survive profile changes, restore and reset", async () => {
+  const cwd = await fixture();
+  const app = host(cwd);
+  await app.command("agent", "scout");
+  const initialBranch = [...app.state.branch];
+  await app.pi.setModel(models[0]);
+  await app.emit("model_select", { model: models[0], source: "set" });
+  app.pi.setThinkingLevel("medium");
+  await app.emit("thinking_level_select", { level: "medium" });
+  assert.deepEqual(initialBranch.at(-1).data.overrides, {});
+  await app.command("agent", "planner");
+  await app.command("agent", "scout");
+  assert.equal(app.state.model.id, "base");
+  assert.equal(app.state.thinking, "medium");
+  const resumed = host(cwd);
+  resumed.setBranch(app.state.branch);
+  await resumed.emit("session_start");
+  assert.equal(resumed.state.model.id, "base");
+  assert.equal(resumed.state.thinking, "medium");
+  await resumed.emit("model_select", { model: models[1], source: "restore" });
+  await resumed.command("agent", "scout");
+  assert.equal(resumed.state.model.id, "base");
+  await resumed.command("agent", "reset");
+  assert.equal(resumed.state.thinking, "high");
+  assert.deepEqual(resumed.state.tools, ["read", "write", "subagent"]);
+  await resumed.command("agent", "scout");
+  assert.equal(resumed.state.thinking, "medium");
+  const fresh = host(cwd);
+  await fresh.emit("session_start");
+  await fresh.command("agent", "scout");
+  assert.equal(fresh.state.model.id, "cheap");
+  assert.equal(fresh.state.thinking, "low");
+  const beforeOverride = host(cwd);
+  beforeOverride.setBranch(initialBranch);
+  await beforeOverride.emit("session_tree");
+  assert.equal(beforeOverride.state.model.id, "cheap");
+  assert.equal(beforeOverride.state.thinking, "low");
 });
 test("discovers existing subagent files and explicit primary profiles, with project precedence", async () => {
   const cwd = await fixture();

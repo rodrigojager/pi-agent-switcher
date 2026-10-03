@@ -151,6 +151,16 @@ export default function(pi) {
       assert.equal(session.model.id, "cheap");
       assert.equal(session.thinkingLevel, "low");
       assert.deepEqual(session.getActiveToolNames(), ["read"]);
+      await session.setModel(
+        session.extensionRunner
+          .getModelRegistry()
+          .find("offline-switcher", "base"),
+      );
+      session.setThinkingLevel("medium");
+      await session.prompt("/agent planner");
+      await session.prompt("/agent scout");
+      assert.equal(session.model.id, "base");
+      assert.equal(session.thinkingLevel, "medium");
       await session.prompt("Check the selected profile");
       const records = async () =>
         (await fs.readFile(marker, "utf8"))

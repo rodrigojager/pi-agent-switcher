@@ -12,10 +12,16 @@ export interface Baseline {
 export interface PersistedState {
   currentAgent: string | null;
   baseline?: Baseline;
+  overrides?: Record<string, ProfileOverride>;
+}
+export interface ProfileOverride {
+  model?: { provider: string; id: string };
+  thinking?: ReturnType<ExtensionAPI["getThinkingLevel"]>;
 }
 export class AgentStateManager {
   agent: AgentConfig | null = null;
   baseline: Baseline | undefined;
+  overrides: Record<string, ProfileOverride> = {};
   capture(pi: ExtensionAPI, ctx: ExtensionContext): Baseline {
     return {
       tools: pi.getActiveTools(),
@@ -29,6 +35,7 @@ export class AgentStateManager {
     pi.appendEntry("agent-switcher-state", {
       currentAgent: this.agent?.name ?? null,
       baseline: this.baseline,
+      overrides: this.overrides,
     } satisfies PersistedState);
   }
 }
