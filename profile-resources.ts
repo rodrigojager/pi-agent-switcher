@@ -25,7 +25,7 @@ interface Policy {
 }
 export const POLICIES: Record<string, Policy> = {
   planner: {
-    skills: ["pi-zgrep-search", "superbuild"],
+    skills: ["pi-zgrep-search", "superbuild", "to-tickets"],
     project: true,
     optionalTools: ["ask_user_question", "plannotator_submit_plan"],
   },
@@ -37,6 +37,8 @@ export const POLICIES: Record<string, Policy> = {
       "goal_complete",
       "goal_blocked",
       "goal_wait",
+      "subagent_wait",
+      "subagent_status",
     ],
   },
   executor: { skills: ["pi-zgrep-search"], project: true },
@@ -63,6 +65,28 @@ export const POLICIES: Record<string, Policy> = {
     mcp: "mcp__blender__",
   },
 };
+/** Command handlers need profile tools before before_agent_start runs. */
+export function resolveProfileTools(
+  pi: ExtensionAPI,
+  profile: ResourceProfile,
+  fallback: string[],
+  child = false,
+): string[] {
+  const configured = new Set(
+    pi
+      .getAllTools()
+      .filter((t) => t.exposure !== "hidden")
+      .map((t) => t.name),
+  );
+  const optional = POLICIES[profile.scope ?? ""]?.optionalTools ?? [];
+  return [
+    ...new Set([
+      ...(profile.tools ?? fallback),
+      ...optional.filter((t) => configured.has(t)),
+      ...(child ? ["complete"] : []),
+    ]),
+  ];
+}
 const physicalPath = (value: string) => {
   let resolved = path.resolve(value);
   try {
@@ -345,15 +369,12 @@ export function registerProfileResources(
       scope = profile?.scope;
     if (!scope || !POLICIES[scope]) return;
     event.systemPromptOptions.skills = [];
-    const optional = POLICIES[scope].optionalTools ?? [];
-    const configured = new Set(pi.getAllTools().map((t) => t.name));
-    const tools = [
-      ...new Set([
-        ...(profile.tools ?? pi.getActiveTools()),
-        ...optional.filter((t) => configured.has(t)),
-        ...(child ? ["complete"] : []),
-      ]),
-    ];
+    const tools = resolveProfileTools(
+      pi,
+      profile!,
+      profile?.tools ?? pi.getActiveTools(),
+      child,
+    );
     pi.setActiveTools(tools);
     event.systemPromptOptions.selectedTools = tools;
   });

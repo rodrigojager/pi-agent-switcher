@@ -464,6 +464,49 @@ test("manual model and thinking selections survive profile changes, restore and 
   assert.equal(beforeOverride.state.model.id, "cheap");
   assert.equal(beforeOverride.state.thinking, "low");
 });
+test("reset preserves a manual model instead of restoring the startup provider, including after resume", async () => {
+  const cwd = await fixture();
+  const app = host(cwd);
+  await app.command("agent", "planner");
+  await app.pi.setModel(models[1]);
+  await app.emit("model_select", { model: models[1], source: "set" });
+  const resumed = host(cwd);
+  resumed.setBranch([...app.state.branch]);
+  await resumed.emit("session_start");
+  for (const h of [app, resumed]) {
+    assert.equal(h.state.branch.at(-1).data.baseline.model.id, "base");
+    await h.command("agent", "reset");
+    assert.equal(h.state.model.id, "cheap");
+    assert.equal(h.state.branch.at(-1).data.currentAgent, null);
+    assert.deepEqual(h.state.tools, ["read", "write", "subagent"]);
+  }
+});
+
+test("orchestrator activates installed goal tools on selection and resume before any agent turn", async () => {
+  const cwd = await fixture();
+  await writeAgent(
+    path.join(cwd, ".pi/agents"),
+    "orchestrator",
+    "resource_profile: orchestrator\ntools: read",
+  );
+  const app = host(cwd);
+  const installTools = (h) => {
+    h.pi.getAllTools = () =>
+      ["read", "write", "subagent", "goal_complete", "goal_blocked"].map(
+        (name) => ({ name, exposure: "direct" }),
+      );
+  };
+  installTools(app);
+  await app.command("agent", "orchestrator");
+  assert.deepEqual(app.state.tools, ["read", "goal_complete", "goal_blocked"]);
+  const resumed = host(cwd);
+  installTools(resumed);
+  resumed.setBranch(app.state.branch);
+  await resumed.emit("session_start");
+  assert.deepEqual(resumed.state.tools, app.state.tools);
+  await app.command("agent", "planner");
+  assert.deepEqual(app.state.tools, ["read", "subagent"]);
+});
 test("discovers existing subagent files and explicit primary profiles, with project precedence", async () => {
   const cwd = await fixture();
   await writeAgent(

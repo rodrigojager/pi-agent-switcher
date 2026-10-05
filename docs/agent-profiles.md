@@ -6,7 +6,7 @@ agents answer in the user's language.
 
 | Profile | Default model / effort | Permitted skills and resources |
 | --- | --- | --- |
-| planner | GPT-6 Astra / high | pi-zgrep-search, superbuild, trusted project skills; planning tools |
+| planner | GPT-6 Astra / high | pi-zgrep-search, superbuild, to-tickets, trusted project skills; planning tools |
 | orchestrator | GPT-6.1 Sol / medium | pi-zgrep-search; bounded agent discovery, subagents, task/goal tools |
 | executor | GPT-6 Luna / high | pi-zgrep-search, trusted project skills; editing and targeted validation |
 | reviewer | GPT-6 Luna / high | pi-zgrep-search, trusted project skills; read-only review instructions |
@@ -53,6 +53,11 @@ Adapt that wrapper and provider fields if using another installation/provider.
 - **Alt+A**: filter and switch the main conversation profile.
 - **Alt+M** or **Ctrl+L**: select the main profile's model; **Shift+Tab** cycles effort.
   These manual choices are retained per profile on the current session branch.
+  `/agent reset` preserves a manually selected model for the current profile;
+  without a manual selection it restores the original baseline model.
+- Installed optional tools are enabled immediately when selecting or restoring a
+  profile. Orchestrator can start `/goal` before sending its first ordinary message;
+  other profiles keep their own resource policy.
 - `@workspace-scout Find ...`: user-driven search without a main-model inference.
 - `@executor Implement ...`: explicitly delegate a bounded task.
 - `/agent-config blender-specialist codex-account-pool/gpt-6-astra high`: save
@@ -67,6 +72,13 @@ agent discovery and model-issued `subagent` calls. The user-facing picker, menti
 and commands can still invoke it. Planner can be selected as the main profile or
 discovered and delegated to when substantive project design is needed; its prompt
 and skills are not included in ordinary orchestration requests.
+
+Planner loads `to-tickets` on demand for task decomposition. Unless a project tracker
+is explicitly configured, tickets are local Markdown files under
+`.scratch/<feature-slug>/issues/`. It recursively splits independently demonstrable
+behaviors while retaining a complete vertical slice in every functional ticket.
+Orchestrator delegates all implementation, worktree operations, merges and executed
+integration checks to executor; it owns scheduling, task state and evidence review.
 
 ## Context behavior
 

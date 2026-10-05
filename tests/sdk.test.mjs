@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 test(
-  "real Pi SDK switches profiles and delegates to a real offline child without a main-model request",
+  "real Pi SDK switches profiles and delegates to offline children with bounded coordinator continuation",
   { timeout: 120000 },
   async () => {
     const root = process.env.PI_SWITCHER_TEST_ROOT
@@ -237,9 +237,10 @@ export default function(pi) {
       assert.ok(result, "Actual child completion returned to the main session");
       assert.match(JSON.stringify(result), /Verified offline delegation/);
       calls = await records();
-      assert.equal(
-        calls.filter((call) => call.pid === process.pid).length,
-        mainCalls,
+      const resumedMainCalls = calls.filter((call) => call.pid === process.pid).length;
+      assert.ok(
+        resumedMainCalls >= mainCalls && resumedMainCalls <= mainCalls + 1,
+        "delegation can request at most one coordinator continuation after its result",
       );
       assert.ok(calls.some((call) => call.child && call.model === "cheap"));
       assert.equal(session.model.id, "base");
@@ -346,10 +347,13 @@ export default function(pi) {
         ),
         /ARCHITECT_ROLE/,
       );
-      assert.equal(
-        calls.filter((c) => c.pid === process.pid).length,
-        mainCalls,
-        "Delegation never called the main model",
+      const completedCount = session.messages.filter(
+        (message) => message.role === "custom" && message.customType === "subagent-result",
+      ).length;
+      const coordinatorCalls = calls.filter((call) => call.pid === process.pid).length;
+      assert.ok(
+        coordinatorCalls >= mainCalls && coordinatorCalls <= mainCalls + completedCount,
+        "Each completed delegation can request at most one coordinator continuation",
       );
       await session.prompt("@executor --role code-reviewer roles-cancel", {
         source: "interactive",

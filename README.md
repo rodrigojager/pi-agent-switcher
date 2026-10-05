@@ -6,7 +6,7 @@ Derived from `pi-agent-switcher@0.2.1` by `byack`, maintained in [KunCheng-He/kk
 
 ## Install
 
-Requires Pi 1.0.0 or newer. For delegation, use [Rodrigo's Pi Subagent](https://github.com/rodrigojager/pi-subagent) `v0.12.4-rodrigo.2` or newer.
+Requires Pi 1.0.0 or newer. For durable event-driven delegation, install [Rodrigo's Pi Subagent](https://github.com/rodrigojager/pi-subagent) `0.13.0-rodrigo.2` and the matching [Pi Agent Mailbox](https://github.com/rodrigojager/pi-agent-mailbox). The switcher keeps its existing delegation behavior when the mailbox is absent.
 
 ```sh
 pi install https://github.com/rodrigojager/pi-agent-switcher
@@ -18,7 +18,7 @@ If Pi is already open, use `/reload` after active work finishes. The package doe
 
 [Dedicated profiles, lazy skills, model defaults and installation](docs/agent-profiles.md)
 describe the planner/orchestrator split, specialist resource policies and fully
-on-demand skill discovery in `0.4.0-rodrigo.7`.
+on-demand skill discovery in `0.4.0-rodrigo.8`. Orchestrators also receive `subagent_wait` and `subagent_status` when the mailbox is loaded; other profiles do not gain those tools.
 
 | Action                               | Command or key                               |
 | ------------------------------------ | -------------------------------------------- |
@@ -87,7 +87,7 @@ Only `name`, `description`, and a nonempty prompt body are required. Agent names
 | `context`  | `false` omits context files such as `AGENTS.md` from the active profile's system prompt.                                    |
 | `mode`     | `primary`, `subagent`, or `both`. Shared agents default to `both`; `k-priagent` profiles default to `primary`.              |
 
-Omitted model, tools, or thinking inherit the session baseline captured before the first activation, preventing restrictions or model choices from a previous specialist leaking into another. Reset restores that baseline. The selected profile and baseline are persisted on the session branch; the user's session name is preserved. Re-select a profile after editing its definition to apply changes.
+Omitted model, tools, or thinking inherit the session baseline captured before the first activation, preventing restrictions or model choices from a previous specialist leaking into another. Reset restores that baseline, except that an explicit manual model selection for the current profile remains selected. This avoids returning to a stale startup provider after choosing another model. The selected profile and baseline are persisted on the session branch; the user's session name is preserved. Re-select a profile after editing its definition to apply changes.
 
 An agent's `model` and `thinking` are defaults. After activation, use Pi's `/model` selector or `Ctrl+P` to change the model, and `Shift+Tab` to cycle thinking levels. Manual selections are remembered for that profile on the current session branch, including switching away and back, reload/resume, and tree navigation. They do not rewrite agent definitions or change other sessions. A new session starts with the definition's defaults. Supported thinking levels depend on the selected model; any model registered and authenticated in Pi can be selected, without editing this extension.
 

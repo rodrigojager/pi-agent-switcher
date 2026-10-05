@@ -26,7 +26,10 @@ import {
   type RoleCatalog,
 } from "pi-subagent-runtime/roles";
 import { pickRole, previewRole } from "./role-picker.js";
-import { registerProfileResources } from "./profile-resources.js";
+import {
+  registerProfileResources,
+  resolveProfileTools,
+} from "./profile-resources.js";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export default function agentSwitcherExtension(pi: ExtensionAPI) {
@@ -150,7 +153,17 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
         return;
       }
       const baseline = state.baseline ?? state.capture(pi, ctx);
-      const tools = agent?.tools ?? baseline.tools;
+      const tools = agent
+        ? resolveProfileTools(
+            pi,
+            {
+              name: agent.name,
+              scope: agent.resourceProfile,
+              tools: agent.tools,
+            },
+            baseline.tools,
+          )
+        : baseline.tools;
       const configured = new Set(
         pi
           .getAllTools()
@@ -160,8 +173,17 @@ export default function agentSwitcherExtension(pi: ExtensionAPI) {
       const missing = tools.filter((tool) => !configured.has(tool));
       if (missing.length)
         throw new Error(`Unavailable tools: ${missing.join(", ")}`);
-      const model = modelFor(agent, baseline, ctx);
-      if (baseline.model && !agent?.model && !model)
+      // Reset removes the profile, preserving an explicitly selected model.
+      // Otherwise a stale startup baseline can reintroduce an unused provider.
+      const keepSelectedModel =
+        !agent &&
+        !!state.agent &&
+        !!state.overrides[state.agent.name]?.model &&
+        !!ctx.model;
+      const model = keepSelectedModel
+        ? ctx.model
+        : modelFor(agent, baseline, ctx);
+      if (!keepSelectedModel && baseline.model && !agent?.model && !model)
         throw new Error(
           `Original model is no longer available: ${baseline.model.provider}/${baseline.model.id}`,
         );

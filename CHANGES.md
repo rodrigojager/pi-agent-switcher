@@ -1,7 +1,15 @@
 # Changes from upstream pi-agent-switcher 0.2.1
 
+## 0.4.0-rodrigo.8
+
+- Give orchestrator profiles the event-driven `subagent_wait` and explicit `subagent_status` tools when the compatible Pi Agent Mailbox extension is installed; executor and specialist profiles keep their previous tool policy.
+- Preserve the profile readiness and manual-model fixes from the installed Rodrigo build, with regression coverage for `/goal` activation before profile switching and offline SDK flows.
+- Direct coordinators to wait for exact child IDs through events rather than repeatedly checking job status.
+
 ## 0.4.0-rodrigo.7
 
+- Enable installed optional profile tools on selection and session restore, before slash commands such as /goal validate their allowlist.
+- Preserve an explicit manual model selection on profile reset instead of returning to a stale startup provider; keep baseline restoration when no manual model was chosen.
 - Disable all automatic skill metadata in the provided profiles and explicit children, including the previous small initial catalog.
 - Add global on-demand discovery mode for Pi default/reset and remove old system catalog patches from outgoing context.
 - Keep profile-specific local skill_catalog/skill_load access without moving shared libraries or changing other clients.

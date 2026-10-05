@@ -10,7 +10,44 @@ const {
   mcpAllowed,
   automaticDelegateAllowed,
   registerProfileResources,
+  resolveProfileTools,
 } = await jiti.import("../profile-resources.ts");
+test("profile tools include only installed visible optional tools and remain deduplicated", () => {
+  const pi = {
+    getAllTools: () => [
+      { name: "goal_complete", exposure: "direct" },
+      { name: "goal_blocked", exposure: "direct" },
+      { name: "goal_wait", exposure: "hidden" },
+      { name: "subagent_wait", exposure: "direct" },
+      { name: "subagent_status", exposure: "direct" },
+    ],
+  };
+  assert.deepEqual(
+    resolveProfileTools(
+      pi,
+      {
+        name: "orchestrator",
+        scope: "orchestrator",
+        tools: ["read", "goal_complete"],
+      },
+      [],
+    ),
+    ["read", "goal_complete", "goal_blocked", "subagent_wait", "subagent_status"],
+  );
+  assert.deepEqual(
+    resolveProfileTools(
+      pi,
+      {
+        name: "executor",
+        scope: "executor",
+        tools: ["read"],
+      },
+      [],
+      true,
+    ),
+    ["read", "complete"],
+  );
+});
 test("resource boundaries exclude other families, review staging and automatic scout", () => {
   const home = path.resolve("fixture/home"),
     agent = path.join(home, ".pi/agent"),
@@ -332,7 +369,7 @@ test(
         provider,
         `import {appendFileSync} from "node:fs";import {Type} from "typebox";import {createAssistantMessageEventStream} from "@earendil-works/pi-ai";
 export default function(pi){
- for(const name of ["zg","subagent","todo","ask_user_question","goal_complete","goal_blocked","goal_wait","plannotator_submit_plan","web_search","fetch_content","get_search_content","source_check"]){pi.registerTool({name,label:name,description:name,parameters:Type.Object({}),async execute(){return {content:[{type:"text",text:"fixture"}],details:{}}}});}
+ for(const name of ["zg","subagent","todo","ask_user_question","goal_complete","goal_blocked","goal_wait","subagent_wait","subagent_status","plannotator_submit_plan","web_search","fetch_content","get_search_content","source_check"]){pi.registerTool({name,label:name,description:name,parameters:Type.Object({}),async execute(){return {content:[{type:"text",text:"fixture"}],details:{}}}});}
  pi.on("before_agent_start",e=>{e.systemPromptOptions.sections.mcp_servers="UNRELATED_SERVICE_CATALOG";});
  pi.registerProvider("offline-profiles",{api:"offline-profiles-api",baseUrl:"http://127.0.0.1:1/unused",apiKey:"offline-test",models:["gpt-6-astra","gpt-6.1-sol","gpt-6-luna"].map(id=>({id,name:id,reasoning:true,input:["text"],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:64000,maxTokens:4096})),streamSimple(model,context){
  appendFileSync(${JSON.stringify(records)},JSON.stringify({model:model.id,context})+"\\n");const s=createAssistantMessageEventStream();queueMicrotask(()=>{const last=context.messages.at(-1);const text=last?.role==="user"?JSON.stringify(last.content):"";const request=text.includes("QUERY_SUPERBUILD")?{name:"skill_catalog",arguments:{query:"superbuild",limit:1}}:text.includes("LOAD_SUPERBUILD")?{name:"skill_load",arguments:{name:"superbuild"}}:text.includes("DENY_HIGGSFIELD")?{name:"skill_load",arguments:{name:"higgsfield"}}:undefined;const content=request?[{type:"toolCall",id:"resource-"+Date.now(),...request}]:[{type:"text",text:"OFFLINE"}];const m={role:"assistant",api:"offline-profiles-api",provider:"offline-profiles",model:model.id,content,stopReason:request?"toolUse":"stop",timestamp:Date.now(),usage:{input:1,output:1,cacheRead:0,cacheWrite:0,totalTokens:2,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};s.push({type:"start",partial:m});s.push({type:"done",reason:m.stopReason,message:m});s.end()});return s;}});
@@ -394,6 +431,11 @@ export default function(pi){
       const errors = [];
       session.extensionRunner.onError((e) => errors.push(e));
       await session.bindExtensions({ mode: "print" });
+      for (const tool of ["goal_complete", "goal_blocked", "goal_wait", "subagent_wait", "subagent_status"])
+        assert.ok(
+          session.getActiveToolNames().includes(tool),
+          `default orchestrator must enable ${tool} before its first turn`,
+        );
       await session.prompt("Default profile fixture");
       assert.equal(session.thinkingLevel, "medium");
       assert.equal(
@@ -413,6 +455,12 @@ export default function(pi){
       };
       for (const [name, allowed] of Object.entries(expected)) {
         await session.prompt("/agent " + name);
+        for (const tool of ["goal_complete", "goal_blocked", "goal_wait", "subagent_wait", "subagent_status"])
+          assert.equal(
+            session.getActiveToolNames().includes(tool),
+            name === "orchestrator",
+            `${name}: immediate ${tool} access`,
+          );
         await session.prompt("Probe " + name);
         const calls = (await fs.readFile(records, "utf8"))
             .trim()
